@@ -1,0 +1,39 @@
+@import "tailwindcss";
+
+body {
+  margin: 0;
+  padding-bottom: 60px;
+}
+
+.bottom-ad {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  background: #028c4c;
+  color: white;
+  padding: 2px;
+  text-align: center;
+
+  z-index: 9999; 
+}
+
+.ad-content {
+  white-space: nowrap;
+  display: inline-block;
+  animation: move 20s linear infinite;
+}
+
+@keyframes move {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(-100%);
+  }
+}
+
+@keyframes supportPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(22, 163, 74, 0); }
+  50%       { box-shadow: 0 0 0 8px rgba(22, 163, 74, 0.18); }
+}
