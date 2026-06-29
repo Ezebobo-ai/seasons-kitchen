@@ -176,7 +176,7 @@ export default function Contact() {
           {/* Social Links */}
           <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
             <SocialLink
-              href="https://wa.me/2348132709509"
+              href="https://wa.me/2348180149672"
               src="/whatsapp.jpeg"
               label="WhatsApp"
               handle="Chat with us"
