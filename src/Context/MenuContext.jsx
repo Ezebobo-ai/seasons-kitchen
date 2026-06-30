@@ -227,7 +227,7 @@ export function MenuProvider({ children }) {
     }
   };
 
-  const updateMenuItem = (id, updated) => {
+  const updateMenuItem = async (id, updated) => {
     const isDrink = updated.category === "Drinks";
     const hasSizes = isDrink && Array.isArray(updated.sizes) && updated.sizes.length > 0;
 
@@ -235,51 +235,64 @@ export function MenuProvider({ children }) {
       ? Math.min(...updated.sizes.map((s) => Number(s.price) || 0))
       : Number(updated.price);
 
-    persist(
-      menuItems.map((item) => {
-        if (item.id !== id) return item;
+    // Same server-read-then-merge pattern as addMenuItem, for the same
+    // reason: avoid overwriting Firestore with a stale local `menuItems`
+    // array if onSnapshot hasn't caught up yet.
+    const ref = doc(db, "settings", "admin");
+    let snap;
+    try {
+      snap = await getDocFromServer(ref);
+    } catch (_) {
+      snap = await getDoc(ref);
+    }
+    const currentMenu = snap.exists() && Array.isArray(snap.data().menu) ? snap.data().menu : menuItems;
 
-        if (hasSizes) {
-          // The edit form only ever submits { ml, price } per size — it has
-          // no stock input. So stock must be carried over from the item's
-          // existing size with the same volume (stock is only ever changed
-          // via the dedicated Stock tab). A genuinely new size tier that
-          // didn't exist before starts at the same default as a new item.
-          const existingByVolume = {};
-          (item.sizes || []).forEach((s) => { existingByVolume[s.volume] = s; });
+    const updatedMenu = currentMenu.map((item) => {
+      if (item.id !== id) return item;
 
-          const nextSizes = updated.sizes.map((s) => {
-            const volume = Number(s.ml);
-            const existing = existingByVolume[volume];
-            return {
-              label: `${volume}ml`,
-              volume,
-              price: Number(s.price),
-              stock: existing ? Number(existing.stock) || 0 : DEFAULT_SIZE_STOCK,
-            };
-          });
+      if (hasSizes) {
+        const existingByVolume = {};
+        (item.sizes || []).forEach((s) => { existingByVolume[s.volume] = s; });
 
+        const nextSizes = updated.sizes.map((s) => {
+          const volume = Number(s.ml);
+          const existing = existingByVolume[volume];
           return {
-            ...item,
-            ...updated,
-            price: basePrice,
-            sizes: nextSizes,
-            quantityAvailable: nextSizes.reduce((sum, s) => sum + (Number(s.stock) || 0), 0),
+            label: `${volume}ml`,
+            volume,
+            price: Number(s.price),
+            stock: existing ? Number(existing.stock) || 0 : DEFAULT_SIZE_STOCK,
           };
-        }
+        });
 
         return {
           ...item,
           ...updated,
           price: basePrice,
-          sizes: isDrink ? item.sizes : undefined,
-          quantityAvailable:
-            updated.quantityAvailable !== undefined
-              ? Number(updated.quantityAvailable)
-              : item.quantityAvailable,
+          sizes: nextSizes,
+          quantityAvailable: nextSizes.reduce((sum, s) => sum + (Number(s.stock) || 0), 0),
         };
-      })
-    );
+      }
+
+      return {
+        ...item,
+        ...updated,
+        price: basePrice,
+        sizes: isDrink ? item.sizes : undefined,
+        quantityAvailable:
+          updated.quantityAvailable !== undefined
+            ? Number(updated.quantityAvailable)
+            : item.quantityAvailable,
+      };
+    });
+
+    try {
+      await setDoc(ref, { menu: updatedMenu }, { merge: true });
+      setMenuItems(updatedMenu);
+    } catch (err) {
+      console.error("Failed to save menu item update to Firestore:", err);
+      throw err;
+    }
   };
 
   const deleteMenuItem = (id) => {

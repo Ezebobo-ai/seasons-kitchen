@@ -114,6 +114,7 @@ export default function AdminPage() {
   const [drinkSizes, setDrinkSizes] = useState([EMPTY_SIZE()]);
   const [menuImagePreview, setMenuImagePreview] = useState(null);
   const [editingMenuId, setEditingMenuId] = useState(null);
+  const [savingMenuItem, setSavingMenuItem] = useState(false);
   const [rejectOrderData, setRejectOrderData] = useState(null);
   const [rejectReason, setRejectReason] = useState("");
   const [activeTab, setActiveTab] = useState("analytics");
@@ -1370,10 +1371,13 @@ export default function AdminPage() {
                 {/* ── SAVE / CANCEL ── */}
                 <div className="flex items-center gap-3 mt-6 pt-5 border-t border-gray-100">
                   <button
-                    onClick={() => {
+                    disabled={savingMenuItem}
+                    onClick={async () => {
                       const isDrink = menuForm.category === "Drinks";
                       if (!menuForm.name.trim()) { alert("Item name is required"); return; }
                       if (!menuForm.category)    { alert("Category is required");  return; }
+
+                      let item;
 
                       if (isDrink) {
                         const validSizes = drinkSizes.filter(s => s.ml !== "" || s.price !== "");
@@ -1387,7 +1391,7 @@ export default function AdminPage() {
                           alert("Duplicate ml sizes found — each size must be unique");
                           return;
                         }
-                        const item = {
+                        item = {
                           name:        menuForm.name.trim(),
                           category:    menuForm.category,
                           description: menuForm.description.trim(),
@@ -1395,28 +1399,40 @@ export default function AdminPage() {
                           sizes:       validSizes,
                           price:       0,
                         };
-                        if (editingMenuId) { updateMenuItem(editingMenuId, item); setEditingMenuId(null); }
-                        else               { addMenuItem(item); }
                       } else {
                         if (!menuForm.price || Number(menuForm.price) <= 0) { alert("Price is required"); return; }
-                        const item = {
+                        item = {
                           name:        menuForm.name.trim(),
                           price:       Number(menuForm.price),
                           description: menuForm.description.trim(),
                           image:       menuForm.image || "",
                           category:    menuForm.category,
                         };
-                        if (editingMenuId) { updateMenuItem(editingMenuId, item); setEditingMenuId(null); }
-                        else               { addMenuItem(item); }
                       }
 
-                      setMenuForm(EMPTY_FORM);
-                      setDrinkSizes([EMPTY_SIZE()]);
-                      setMenuImagePreview(null);
+                      setSavingMenuItem(true);
+                      try {
+                        if (editingMenuId) {
+                          await updateMenuItem(editingMenuId, item);
+                          setEditingMenuId(null);
+                        } else {
+                          await addMenuItem(item);
+                        }
+                        // Only clear the form once Firestore has confirmed the write —
+                        // this is what stops the "disappears after refresh" bug.
+                        setMenuForm(EMPTY_FORM);
+                        setDrinkSizes([EMPTY_SIZE()]);
+                        setMenuImagePreview(null);
+                      } catch (err) {
+                        console.error("Failed to save menu item:", err);
+                        alert("❌ Failed to save item — please check your connection and try again.");
+                      } finally {
+                        setSavingMenuItem(false);
+                      }
                     }}
-                    className="bg-green-600 hover:bg-green-700 text-white px-6 py-2.5 rounded-xl font-semibold text-sm transition shadow-sm"
+                    className="bg-green-600 hover:bg-green-700 disabled:opacity-60 disabled:cursor-not-allowed text-white px-6 py-2.5 rounded-xl font-semibold text-sm transition shadow-sm"
                   >
-                    {editingMenuId ? "Save Changes" : "Add to Menu"}
+                    {savingMenuItem ? "Saving…" : editingMenuId ? "Save Changes" : "Add to Menu"}
                   </button>
                   {editingMenuId && (
                     <button
