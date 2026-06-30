@@ -5,7 +5,7 @@ import { Link } from "react-router-dom";
 
 export default function OrderPage() {
   const { cart, setCart } = useContext(CartContext) || {};
-  const { menuItems } = useContext(MenuContext);
+  const { menuItems, isInStock } = useContext(MenuContext);
 
   const [activeCategory, setActiveCategory] = useState("Rice & Pasta");
   const [search, setSearch] = useState("");
@@ -199,7 +199,7 @@ export default function OrderPage() {
               const isDrinkWithSizes = Array.isArray(item.sizes) && item.sizes.length > 0;
               const inCart = (cart || []).find((c) => c.id === item.id);
               const available = item.quantityAvailable ?? 0;
-              const isOutOfStock = available <= 0;
+              const isOutOfStock = !isInStock(item);
 
              
               const totalQtyForItem = (cart || [])

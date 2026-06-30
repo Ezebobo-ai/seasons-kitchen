@@ -1,4 +1,6 @@
-import React, { createContext, useState } from "react";
+import React, { createContext, useState, useEffect } from "react";
+import { doc, setDoc, onSnapshot } from "firebase/firestore";
+import { db } from "../firebase.js";
 
 // ─── HARDCODED SEED DATA ───────────────────────────────────────────────────
 // quantityAvailable: number of plates/portions available for ordering.
@@ -105,59 +107,61 @@ export const CATEGORIES = [
   "Promotion",
 ];
 
+// ─── MIGRATION HELPER ───────────────────────────────────────────────────────
+// Same logic that used to live inline inside the localStorage useState
+// initializer — extracted so it can also run inside the Firestore
+// onSnapshot callback. Ensures every item has quantityAvailable, that any
+// known drink also has its `sizes` array, and that every size on a drink
+// has its own numeric `stock`.
+function migrateMenu(parsed) {
+  const sizesById = {};
+  SEED_MENU.forEach((seedItem) => {
+    if (seedItem.sizes) sizesById[seedItem.id] = seedItem.sizes;
+  });
+  return parsed.map((item) => {
+    const withSizes = !item.sizes && sizesById[item.id] ? { sizes: sizesById[item.id] } : {};
+    const sizes = withSizes.sizes || item.sizes;
+    const quantityAvailable = item.quantityAvailable !== undefined ? item.quantityAvailable : 20;
+
+    if (Array.isArray(sizes)) {
+      const migratedSizes = sizes.map((s) => ({
+        ...s,
+        stock: s.stock !== undefined ? Number(s.stock) : quantityAvailable,
+      }));
+      return {
+        ...item,
+        sizes: migratedSizes,
+        quantityAvailable: migratedSizes.reduce((sum, s) => sum + (Number(s.stock) || 0), 0),
+      };
+    }
+
+    return { ...item, quantityAvailable, ...withSizes };
+  });
+}
+
 // ─── CONTEXT ──────────────────────────────────────────────────────────────
 export const MenuContext = createContext();
 
 export function MenuProvider({ children }) {
-  // On first load: if localStorage has no "menuItems" key, seed it with SEED_MENU.
-  // If existing items don't have quantityAvailable, merge it in without wiping data.
-  const [menuItems, setMenuItems] = useState(() => {
-    try {
-      const stored = localStorage.getItem("menuItems");
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        // Build a lookup of the known drink sizes by id so browsers with a
-        // cached menuItems list from before size-based drinks existed still
-        // get the new `sizes` data merged in, instead of staying stuck with
-        // only a flat price for drinks.
-        const sizesById = {};
-        SEED_MENU.forEach((seedItem) => {
-          if (seedItem.sizes) sizesById[seedItem.id] = seedItem.sizes;
-        });
-        // Migrate: ensure every item has quantityAvailable, that any known
-        // drink also has its `sizes` array, and that every size on a drink
-        // has its own numeric `stock` (browsers with a menu cached from
-        // before per-size stock existed get it backfilled here — using the
-        // item's old shared quantityAvailable as a starting value for each
-        // size rather than 0, so nothing looks falsely "sold out" right
-        // after this update ships).
-        return parsed.map((item) => {
-          const withSizes = !item.sizes && sizesById[item.id] ? { sizes: sizesById[item.id] } : {};
-          const sizes = withSizes.sizes || item.sizes;
-          const quantityAvailable = item.quantityAvailable !== undefined ? item.quantityAvailable : 20;
+  const [menuItems, setMenuItems] = useState(SEED_MENU);
 
-          if (Array.isArray(sizes)) {
-            const migratedSizes = sizes.map((s) => ({
-              ...s,
-              stock: s.stock !== undefined ? Number(s.stock) : quantityAvailable,
-            }));
-            return {
-              ...item,
-              sizes: migratedSizes,
-              quantityAvailable: migratedSizes.reduce((sum, s) => sum + (Number(s.stock) || 0), 0),
-            };
-          }
-
-          return { ...item, quantityAvailable, ...withSizes };
-        });
+  // Live-sync menu from Firestore: settings/admin → menu
+  useEffect(() => {
+    const ref = doc(db, "settings", "admin");
+    const unsub = onSnapshot(ref, (snap) => {
+      if (snap.exists() && Array.isArray(snap.data().menu)) {
+        setMenuItems(migrateMenu(snap.data().menu));
+      } else {
+        // First run for this project: seed Firestore with SEED_MENU.
+        setDoc(ref, { menu: SEED_MENU }, { merge: true });
       }
-    } catch (_) {}
-    return SEED_MENU;
-  });
+    });
+    return () => unsub();
+  }, []);
 
   const persist = (items) => {
     setMenuItems(items);
-    localStorage.setItem("menuItems", JSON.stringify(items));
+    setDoc(doc(db, "settings", "admin"), { menu: items }, { merge: true });
   };
 
   const addMenuItem = (item) => {
@@ -356,6 +360,14 @@ export function MenuProvider({ children }) {
     );
   };
 
+  // ── DERIVED IN-STOCK CHECK ──────────────────────────────────────────────
+  // Drinks are in stock if ANY size still has stock > 0.
+  // Regular items are in stock if quantityAvailable > 0.
+  const isInStock = (item) =>
+    Array.isArray(item.sizes)
+      ? item.sizes.some((s) => (Number(s.stock) || 0) > 0)
+      : (item.quantityAvailable ?? 0) > 0;
+
   return (
     <MenuContext.Provider
       value={{
@@ -368,6 +380,7 @@ export function MenuProvider({ children }) {
         decreaseMenuStock,
         increaseSizeStock,
         decreaseSizeStock,
+        isInStock,
         CATEGORIES,
       }}
     >
