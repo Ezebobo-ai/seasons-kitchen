@@ -76,10 +76,14 @@ export default function ThankYouPage() {
     }
   };
 
-  const handleSendWhatsApp = () => {
+  const handleSendWhatsApp = async () => {
     setWaOpened(true);
     waSentRef.current = true;
-    sendNewOrderToKitchen(orderData);
+    try {
+      await sendNewOrderToKitchen(orderData);
+    } catch (err) {
+      console.error("Failed to open WhatsApp with order:", err);
+    }
     setTimeout(() => setWaOpened(false), 3000);
   };
 

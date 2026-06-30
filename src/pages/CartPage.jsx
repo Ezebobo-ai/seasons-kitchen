@@ -39,11 +39,7 @@ if (orderType === "Home Delivery") {
 }
   const total = subtotal + vat + serviceCharge + packaging;
 
-  // ── Quantity handlers ────────────────────────────────────────────────────
-  // increaseQty now respects stock limits — for a drink, the specific size's
-  // own stock; for everything else, the item's flat quantityAvailable.
-  // (Previously this incremented with no cap at all, which meant the Cart
-  // page could push a line past the limit OrderPage already enforces.)
+  
   const increaseQty = (index) => {
     const line = cart[index];
     const menuItem = menuItems.find((m) => m.id === line.id);
@@ -73,7 +69,7 @@ if (orderType === "Home Delivery") {
     setCart(updated);
   };
 
-  // ── NEW FLOW: Cart → Payment Page → WhatsApp ─────────────────────────────
+  
   const handleProceedToPayment = () => {
     if (!customerName.trim()) return alert("Please enter your name");
 
@@ -106,13 +102,13 @@ if (orderType === "Home Delivery") {
       createdAt: new Date().toISOString(),
     };
 
-    // Save to localStorage for PaymentPage to read
+
     localStorage.setItem("orderData", JSON.stringify(orderData));
 
-    // Deduct stock now (before payment, preserving existing logic)
+    
     deductMenuStock(cart);
 
-    // Navigate to payment page — WhatsApp happens AFTER payment confirmed
+  
     navigate("/payment");
   };
 

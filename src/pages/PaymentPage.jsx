@@ -59,10 +59,7 @@ export default function PaymentPage() {
     setTimeout(() => setCopied(false), 2500);
   };
 
-  // ── THE MAIN SEQUENCE ────────────────────────────────────────────────────
-  // 1. Briefly confirm payment was recorded (UX feedback only)
-  // 2. Navigate to /thank-you, where the receipt download and WhatsApp send
-  //    are both fully manual, user-initiated actions — nothing auto-fires.
+  
   const handlePaymentConfirmed = async () => {
     if (step !== STEPS.IDLE) return; // prevent double-tap
 

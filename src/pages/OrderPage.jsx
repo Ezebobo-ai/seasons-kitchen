@@ -12,13 +12,9 @@ export default function OrderPage() {
   const [previewImage, setPreviewImage] = useState(null);
   const [toast, setToast] = useState("");
   const [expandedItems, setExpandedItems] = useState({});
-  // Tracks the currently-selected size label per drink item id, e.g.
-  // { 22: "500ml" }. Nothing selected (undefined) means the customer hasn't
-  // chosen a size yet, so "Add to Order" stays disabled for that item.
+  
   const [selectedSizeByItem, setSelectedSizeByItem] = useState({});
 
-  // Min/max price across an item's size options, used for the "from ₦x"
-  // badge shown on drink cards before a size is picked.
   const getSizePriceRange = (sizes = []) => {
     const prices = sizes.map((s) => Number(s.price) || 0);
     return { min: Math.min(...prices), max: Math.max(...prices) };
@@ -36,16 +32,11 @@ export default function OrderPage() {
     setTimeout(() => setToast(""), 2500);
   };
 
-  // Two cart lines are "the same line" if they're the same menu item AND,
-  // for items with size variants, the same size. For items with no size
-  // (all food), `size` is undefined on both sides, so this behaves exactly
-  // like the old id+name check — no change for non-drink items.
+  
   const isSameCartLine = (a, b) =>
     a.id === b.id && a.name === b.name && (a.size || null) === (b.size || null);
 
-  // Resolves the correct "how many are available" number for a cart line
-  // or a menu item being added: for a drink, that's the specific size's own
-  // stock; for everything else, it's the item's flat quantityAvailable.
+ 
   const getAvailableFor = (menuItem, sizeLabel) => {
     if (!menuItem) return 0;
     if (sizeLabel && Array.isArray(menuItem.sizes)) {
@@ -59,9 +50,7 @@ export default function OrderPage() {
     const menuItem = menuItems.find((m) => m.id === itemToAdd.id);
     const available = getAvailableFor(menuItem || itemToAdd, itemToAdd.size);
 
-    // Each size has its own independent stock pool now, so only sum the
-    // cart quantity already held for this exact id+size combination —
-    // not across every size variant of the drink.
+  
     const currentQty = (cart || [])
       .filter((c) => c.id === itemToAdd.id && (c.size || null) === (itemToAdd.size || null))
       .reduce((sum, c) => sum + (c.quantity || 0), 0);
@@ -113,11 +102,7 @@ export default function OrderPage() {
     });
   };
 
-  // Adds a drink with the size the customer picked. Strips `sizes` off the
-  // cart entry (it's only needed for the picker UI) and sets `size`,
-  // `volume`, and `price` from the chosen option — this is the one new
-  // entry point for drinks; it still goes through the same addToCart used
-  // by every food item, so stock checks and merge logic stay identical.
+ 
   const addDrinkToCart = (item, sizeOption) => {
     const { sizes, ...base } = item;
     addToCart({
@@ -216,10 +201,7 @@ export default function OrderPage() {
               const available = item.quantityAvailable ?? 0;
               const isOutOfStock = available <= 0;
 
-              // Total quantity already in the cart for this item, summed
-              // across every size variant — used for the corner badge and
-              // for gating "Add" once stock runs out. For food items this
-              // is identical to inCart.quantity (only ever one line).
+             
               const totalQtyForItem = (cart || [])
                 .filter((c) => c.id === item.id)
                 .reduce((sum, c) => sum + (c.quantity || 0), 0);

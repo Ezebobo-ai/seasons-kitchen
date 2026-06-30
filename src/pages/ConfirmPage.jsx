@@ -28,7 +28,7 @@ export default function ConfirmPage() {
       receiverPhone,
       roomNumber,
 
-      // ✅ GET VALUES DIRECTLY (VERY IMPORTANT 🔥)
+      
       subtotal = 0,
       vat = 0,
       serviceCharge = 0,

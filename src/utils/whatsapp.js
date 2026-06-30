@@ -1,6 +1,10 @@
 // src/utils/whatsapp.js
 
-export const BUSINESS_WHATSAPP_NUMBER = "2348180149672";
+import { getWhatsappNumber, FALLBACK_WHATSAPP_NUMBER } from "./settingsService.js";
+
+// Kept for any legacy code/imports that still reference this constant directly.
+// Prefer `getWhatsappNumber()` (async, Firestore-backed) for anything new.
+export const BUSINESS_WHATSAPP_NUMBER = FALLBACK_WHATSAPP_NUMBER;
 
 export function normalizePhone(phone) {
   if (!phone) return null;
@@ -224,9 +228,30 @@ export function buildNewOrderMessage(orderData) {
   return lines.join("\n");
 }
 
-export function sendNewOrderToKitchen(orderData) {
+export async function sendNewOrderToKitchen(orderData) {
   const message = buildNewOrderMessage(orderData);
-  const link = buildWaLink(BUSINESS_WHATSAPP_NUMBER, message);
-  window.open(link, "_blank", "noopener,noreferrer");
+
+  // Open the tab synchronously (on the user's click) so browsers don't
+  // block it as a popup — we navigate it to the real link once the
+  // WhatsApp number has been fetched from Firestore.
+  const waTab = window.open("", "_blank", "noopener,noreferrer");
+
+  let number;
+  try {
+    number = await getWhatsappNumber();
+  } catch (err) {
+    console.error("[whatsapp] Failed to resolve WhatsApp number, using fallback:", err);
+    number = FALLBACK_WHATSAPP_NUMBER;
+  }
+
+  const link = buildWaLink(number, message);
+
+  if (waTab) {
+    waTab.location.href = link;
+  } else {
+    // Popup was blocked — fall back to a direct navigation attempt.
+    window.open(link, "_blank", "noopener,noreferrer");
+  }
+
   return link;
 }
