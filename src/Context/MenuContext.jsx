@@ -206,8 +206,17 @@ export function MenuProvider({ children }) {
     const currentMenu = snap.exists() && Array.isArray(snap.data().menu) ? snap.data().menu : menuItems;
     const updatedMenu = [newItem, ...currentMenu];
 
-    setMenuItems(updatedMenu);
-    await setDoc(ref, { menu: updatedMenu }, { merge: true });
+    try {
+      // Await the write and confirm it actually committed before touching
+      // local state — setDoc can reject (rules, network, quota) and that
+      // rejection was previously being swallowed, so the UI showed the
+      // new item optimistically while Firestore never received it.
+      await setDoc(ref, { menu: updatedMenu }, { merge: true });
+      setMenuItems(updatedMenu);
+    } catch (err) {
+      console.error("Failed to save new menu item to Firestore:", err);
+      throw err;
+    }
   };
 
   const updateMenuItem = (id, updated) => {
