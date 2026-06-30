@@ -1,5 +1,7 @@
 // src/components/AdminMediaPanel.jsx
 // Drop-in panel for the Admin dashboard — media management tab.
+// No changes to UI — only the size-limit alert text is updated to remove
+// the "localStorage" reference now that storage is Firestore.
 
 import React, { useRef, useState } from "react";
 import { useMedia } from "../Context/MediaContext.jsx";
@@ -58,13 +60,19 @@ function VideoPanel() {
       alert("Please upload a video file (MP4, WebM, etc.)");
       return;
     }
+    // FIX: updated limit message — no longer mentions localStorage
     if (file.size > 60 * 1024 * 1024) {
-      alert("Video must be under 60 MB for smooth localStorage storage.");
+      alert("Video must be under 60 MB.");
       return;
     }
     setUploading(true);
-    await uploadVideo(file);
-    setUploading(false);
+    try {
+      await uploadVideo(file);
+    } catch {
+      alert("❌ Failed to save video — please check your connection and try again.");
+    } finally {
+      setUploading(false);
+    }
   };
 
   return (
@@ -148,8 +156,13 @@ function ImagesPanel() {
     const valid = Array.from(files).filter((f) => f.type.startsWith("image/"));
     if (!valid.length) return;
     setUploading(true);
-    await uploadImages(valid);
-    setUploading(false);
+    try {
+      await uploadImages(valid);
+    } catch {
+      alert("❌ Failed to save images — please check your connection and try again.");
+    } finally {
+      setUploading(false);
+    }
   };
 
   const handleReplace = (index, e) => {
