@@ -142,6 +142,21 @@ function migrateMenu(parsed) {
 // ─── CONTEXT ──────────────────────────────────────────────────────────────
 export const MenuContext = createContext();
 
+// Recursively strip any keys whose value is `undefined` from an object.
+// Firestore throws "Unsupported field value: undefined" on any such key,
+// so we sanitise every item before writing to the database.
+function cleanForFirestore(obj) {
+  if (Array.isArray(obj)) return obj.map(cleanForFirestore);
+  if (obj !== null && typeof obj === "object") {
+    return Object.fromEntries(
+      Object.entries(obj)
+        .filter(([, v]) => v !== undefined)
+        .map(([k, v]) => [k, cleanForFirestore(v)])
+    );
+  }
+  return obj;
+}
+
 export function MenuProvider({ children }) {
   const [menuItems, setMenuItems] = useState(SEED_MENU);
 
@@ -160,8 +175,9 @@ export function MenuProvider({ children }) {
   }, []);
 
   const persist = (items) => {
-    setMenuItems(items);
-    setDoc(doc(db, "settings", "admin"), { menu: items }, { merge: true });
+    const safe = cleanForFirestore(items);
+    setMenuItems(safe);
+    setDoc(doc(db, "settings", "admin"), { menu: safe }, { merge: true });
   };
 
   const addMenuItem = async (item) => {
@@ -190,13 +206,19 @@ export function MenuProvider({ children }) {
       ...item,
       id: Date.now(),
       price: basePrice,
-      // Only attach sizes for Drinks that actually have size entries.
-      // Strip sizes entirely from non-drink items.
-      ...(hasSizes ? { sizes: sizesWithStock } : { sizes: undefined }),
       quantityAvailable: hasSizes
         ? sizesWithStock.reduce((sum, s) => sum + (Number(s.stock) || 0), 0)
         : Number(item.quantityAvailable || 20),
     };
+
+    // Firestore rejects `undefined` values — never spread { sizes: undefined }.
+    // For drinks with sizes, set the field explicitly.
+    // For everything else, delete the key entirely so it is absent from the document.
+    if (hasSizes) {
+      newItem.sizes = sizesWithStock;
+    } else {
+      delete newItem.sizes;
+    }
 
     // Read the current menu directly from the Firestore SERVER (not local
     // cache) so we always append to the true latest array. A plain getDoc()
@@ -213,14 +235,11 @@ export function MenuProvider({ children }) {
     }
     const currentMenu = snap.exists() && Array.isArray(snap.data().menu) ? snap.data().menu : menuItems;
     const updatedMenu = [newItem, ...currentMenu];
+    const safeMenu = cleanForFirestore(updatedMenu);
 
     try {
-      // Await the write and confirm it actually committed before touching
-      // local state — setDoc can reject (rules, network, quota) and that
-      // rejection was previously being swallowed, so the UI showed the
-      // new item optimistically while Firestore never received it.
-      await setDoc(ref, { menu: updatedMenu }, { merge: true });
-      setMenuItems(updatedMenu);
+      await setDoc(ref, { menu: safeMenu }, { merge: true });
+      setMenuItems(safeMenu);
     } catch (err) {
       console.error("Failed to save new menu item to Firestore:", err);
       throw err;
@@ -274,21 +293,32 @@ export function MenuProvider({ children }) {
         };
       }
 
-      return {
+      // Firestore rejects `undefined` values — never assign sizes: undefined.
+      // Carry existing sizes for drinks, delete the field entirely for non-drinks.
+      const result = {
         ...item,
         ...updated,
         price: basePrice,
-        sizes: isDrink ? item.sizes : undefined,
         quantityAvailable:
           updated.quantityAvailable !== undefined
             ? Number(updated.quantityAvailable)
             : item.quantityAvailable,
       };
+
+      if (isDrink) {
+        result.sizes = item.sizes;
+      } else {
+        delete result.sizes;
+      }
+
+      return result;
     });
 
+    const safeMenu = cleanForFirestore(updatedMenu);
+
     try {
-      await setDoc(ref, { menu: updatedMenu }, { merge: true });
-      setMenuItems(updatedMenu);
+      await setDoc(ref, { menu: safeMenu }, { merge: true });
+      setMenuItems(safeMenu);
     } catch (err) {
       console.error("Failed to save menu item update to Firestore:", err);
       throw err;
