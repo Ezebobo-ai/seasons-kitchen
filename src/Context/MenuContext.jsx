@@ -1,5 +1,5 @@
 import React, { createContext, useState, useEffect } from "react";
-import { doc, getDoc, setDoc, onSnapshot } from "firebase/firestore";
+import { doc, getDoc, getDocFromServer, setDoc, onSnapshot } from "firebase/firestore";
 import { db } from "../firebase.js";
 
 // ─── HARDCODED SEED DATA ───────────────────────────────────────────────────
@@ -198,11 +198,19 @@ export function MenuProvider({ children }) {
         : Number(item.quantityAvailable || 20),
     };
 
-    // Read the current menu directly from Firestore (not the local
-    // `menuItems` closure, which can be stale) so the new item is appended
-    // to what's actually persisted, then write the merged array back.
+    // Read the current menu directly from the Firestore SERVER (not local
+    // cache) so we always append to the true latest array. A plain getDoc()
+    // can return a stale cached snapshot while onSnapshot's listener is
+    // mid-flight on the same document — that race is what caused the new
+    // item to sometimes vanish or never appear at all. If the device is
+    // offline, fall back to a regular getDoc (cache) rather than failing.
     const ref = doc(db, "settings", "admin");
-    const snap = await getDoc(ref);
+    let snap;
+    try {
+      snap = await getDocFromServer(ref);
+    } catch (_) {
+      snap = await getDoc(ref);
+    }
     const currentMenu = snap.exists() && Array.isArray(snap.data().menu) ? snap.data().menu : menuItems;
     const updatedMenu = [newItem, ...currentMenu];
 
