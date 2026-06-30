@@ -168,7 +168,7 @@ export function MenuProvider({ children }) {
         setMenuItems(migrateMenu(snap.data().menu));
       } else {
         // First run for this project: seed Firestore with SEED_MENU.
-        setDoc(ref, { menu: SEED_MENU }, { merge: true });
+        setDoc(ref, { menu: cleanForFirestore(SEED_MENU) }, { merge: true });
       }
     });
     return () => unsub();
@@ -184,48 +184,39 @@ export function MenuProvider({ children }) {
     const isDrink = item.category === "Drinks";
     const hasSizes = isDrink && Array.isArray(item.sizes) && item.sizes.length > 0;
 
-    // For drinks with sizes: derive the canonical `price` from the smallest
-    // size so that any legacy code reading item.price still gets a valid number.
     const basePrice = hasSizes
       ? Math.min(...item.sizes.map((s) => Number(s.price) || 0))
-      : Number(item.price);
+      : Number(item.price) || 0;
 
-    // New size tiers start with a default stock — same convention as a
-    // brand-new non-drink item defaulting to 20 portions. Admin can then
-    // adjust the exact count per size from the Stock tab right away.
     const sizesWithStock = hasSizes
       ? item.sizes.map((s) => ({
           label: `${Number(s.ml)}ml`,
           volume: Number(s.ml),
           price: Number(s.price),
-          stock: s.stock !== undefined ? Number(s.stock) : DEFAULT_SIZE_STOCK,
+          stock: Number(s.stock) || DEFAULT_SIZE_STOCK,
         }))
-      : undefined;
+      : null;
 
+    // Build newItem from EXPLICIT fields only — never spread `...item` because
+    // unknown or undefined fields from the form will bypass cleanForFirestore
+    // and cause Firestore to reject the entire write.
     const newItem = {
-      ...item,
-      id: Date.now(),
-      price: basePrice,
+      id:                Date.now(),
+      name:              String(item.name  || ""),
+      category:          String(item.category || ""),
+      description:       String(item.description || ""),
+      image:             String(item.image || ""),
+      price:             basePrice,
       quantityAvailable: hasSizes
-        ? sizesWithStock.reduce((sum, s) => sum + (Number(s.stock) || 0), 0)
+        ? sizesWithStock.reduce((sum, s) => sum + s.stock, 0)
         : Number(item.quantityAvailable || 20),
     };
 
-    // Firestore rejects `undefined` values — never spread { sizes: undefined }.
-    // For drinks with sizes, set the field explicitly.
-    // For everything else, delete the key entirely so it is absent from the document.
+    // Only add sizes for drinks — omit the field entirely for food items
     if (hasSizes) {
       newItem.sizes = sizesWithStock;
-    } else {
-      delete newItem.sizes;
     }
 
-    // Read the current menu directly from the Firestore SERVER (not local
-    // cache) so we always append to the true latest array. A plain getDoc()
-    // can return a stale cached snapshot while onSnapshot's listener is
-    // mid-flight on the same document — that race is what caused the new
-    // item to sometimes vanish or never appear at all. If the device is
-    // offline, fall back to a regular getDoc (cache) rather than failing.
     const ref = doc(db, "settings", "admin");
     let snap;
     try {
@@ -233,9 +224,14 @@ export function MenuProvider({ children }) {
     } catch (_) {
       snap = await getDoc(ref);
     }
-    const currentMenu = snap.exists() && Array.isArray(snap.data().menu) ? snap.data().menu : menuItems;
-    const updatedMenu = [newItem, ...currentMenu];
-    const safeMenu = cleanForFirestore(updatedMenu);
+
+    // Clean the existing Firestore menu too — old corrupt saves may have
+    // left undefined values in the stored array
+    const rawMenu = snap.exists() && Array.isArray(snap.data().menu)
+      ? snap.data().menu
+      : menuItems;
+
+    const safeMenu = cleanForFirestore([newItem, ...rawMenu]);
 
     try {
       await setDoc(ref, { menu: safeMenu }, { merge: true });
@@ -252,11 +248,8 @@ export function MenuProvider({ children }) {
 
     const basePrice = hasSizes
       ? Math.min(...updated.sizes.map((s) => Number(s.price) || 0))
-      : Number(updated.price);
+      : Number(updated.price) || 0;
 
-    // Same server-read-then-merge pattern as addMenuItem, for the same
-    // reason: avoid overwriting Firestore with a stale local `menuItems`
-    // array if onSnapshot hasn't caught up yet.
     const ref = doc(db, "settings", "admin");
     let snap;
     try {
@@ -264,7 +257,9 @@ export function MenuProvider({ children }) {
     } catch (_) {
       snap = await getDoc(ref);
     }
-    const currentMenu = snap.exists() && Array.isArray(snap.data().menu) ? snap.data().menu : menuItems;
+    const currentMenu = snap.exists() && Array.isArray(snap.data().menu)
+      ? snap.data().menu
+      : menuItems;
 
     const updatedMenu = currentMenu.map((item) => {
       if (item.id !== id) return item;
@@ -277,41 +272,38 @@ export function MenuProvider({ children }) {
           const volume = Number(s.ml);
           const existing = existingByVolume[volume];
           return {
-            label: `${volume}ml`,
+            label:  `${volume}ml`,
             volume,
-            price: Number(s.price),
-            stock: existing ? Number(existing.stock) || 0 : DEFAULT_SIZE_STOCK,
+            price:  Number(s.price),
+            stock:  existing ? Number(existing.stock) || 0 : DEFAULT_SIZE_STOCK,
           };
         });
 
+        // Explicit fields only — no spread of unknown data
         return {
-          ...item,
-          ...updated,
-          price: basePrice,
-          sizes: nextSizes,
-          quantityAvailable: nextSizes.reduce((sum, s) => sum + (Number(s.stock) || 0), 0),
+          id:                item.id,
+          name:              String(updated.name        || item.name        || ""),
+          category:          String(updated.category    || item.category    || ""),
+          description:       String(updated.description || item.description || ""),
+          image:             String(updated.image       ?? item.image       ?? ""),
+          price:             basePrice,
+          sizes:             nextSizes,
+          quantityAvailable: nextSizes.reduce((sum, s) => sum + s.stock, 0),
         };
       }
 
-      // Firestore rejects `undefined` values — never assign sizes: undefined.
-      // Carry existing sizes for drinks, delete the field entirely for non-drinks.
-      const result = {
-        ...item,
-        ...updated,
-        price: basePrice,
-        quantityAvailable:
-          updated.quantityAvailable !== undefined
-            ? Number(updated.quantityAvailable)
-            : item.quantityAvailable,
+      // Non-drink — explicit fields, no sizes field at all
+      return {
+        id:                item.id,
+        name:              String(updated.name        || item.name        || ""),
+        category:          String(updated.category    || item.category    || ""),
+        description:       String(updated.description || item.description || ""),
+        image:             String(updated.image       ?? item.image       ?? ""),
+        price:             basePrice,
+        quantityAvailable: updated.quantityAvailable !== undefined
+          ? Number(updated.quantityAvailable)
+          : Number(item.quantityAvailable  || 0),
       };
-
-      if (isDrink) {
-        result.sizes = item.sizes;
-      } else {
-        delete result.sizes;
-      }
-
-      return result;
     });
 
     const safeMenu = cleanForFirestore(updatedMenu);
