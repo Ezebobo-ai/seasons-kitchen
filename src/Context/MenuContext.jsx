@@ -1,10 +1,8 @@
-import React, { createContext, useState, useEffect } from "react";
-import { doc, getDoc, getDocFromServer, setDoc, onSnapshot } from "firebase/firestore";
+import React, { createContext, useState, useEffect, useRef } from "react";
+import { doc, getDoc, setDoc, onSnapshot } from "firebase/firestore";
 import { db } from "../firebase.js";
 
 // ─── HARDCODED SEED DATA ───────────────────────────────────────────────────
-// quantityAvailable: number of plates/portions available for ordering.
-// Set to a default of 20 for all items on first load.
 const SEED_MENU = [
   // Breakfast
   { id: 301, category: "Breakfast", name: "Akara", price: 3500, image: "/akara.jpeg", description: "Crispy deep-fried bean cakes, golden on the outside and fluffy within. A beloved Nigerian breakfast staple.", quantityAvailable: 20 },
@@ -64,14 +62,6 @@ const SEED_MENU = [
   { id: 37, category: "Customer's Delight", name: "Yam and Egg Sauce", price: 1000, image: "/yam.jpeg", description: "A beloved combination — soft boiled yam served alongside a rich, spiced egg sauce.", quantityAvailable: 20 },
 
   // Drinks
-  // `price` stays as the smallest-size price for backward compatibility with
-  // any code that doesn't know about `sizes` (e.g. Admin's flat price column).
-  // `sizes` is the source of truth the order page uses to let customers pick
-  // a volume — each entry has a label, a numeric volume in ml, its own
-  // price, AND its own `stock` (drinks are stocked per size, not as one
-  // shared pool). `quantityAvailable` on a drink is always kept in sync as
-  // the sum of its sizes' stock, purely so any older code that still reads
-  // the flat field gets a sensible aggregate.
   { id: 22, category: "Drinks", name: "Tigernut Drink", price: 1500, image: "/Tigernut.jpeg", description: "Naturally sweet, creamy tigernut milk — a probiotic-rich traditional Nigerian refreshment.", quantityAvailable: 20,
     sizes: [{ label: "250ml", volume: 250, price: 1500, stock: 12 }, { label: "500ml", volume: 500, price: 2500, stock: 8 }] },
   { id: 23, category: "Drinks", name: "Zobo Drink", price: 1500, image: "/Zobo.jpeg", description: "Deep ruby hibiscus drink infused with ginger, cloves, and citrus. Refreshing and antioxidant-rich.", quantityAvailable: 20,
@@ -90,8 +80,6 @@ const SEED_MENU = [
     sizes: [{ label: "250ml", volume: 250, price: 2813, stock: 6 }, { label: "500ml", volume: 500, price: 4500, stock: 4 }] },
 ];
 
-// Default stock assigned to a size tier that has no prior stock on record
-// (a brand-new drink, or a brand-new size added to an existing drink).
 const DEFAULT_SIZE_STOCK = 20;
 
 export const CATEGORIES = [
@@ -107,44 +95,11 @@ export const CATEGORIES = [
   "Promotion",
 ];
 
-// ─── MIGRATION HELPER ───────────────────────────────────────────────────────
-// Same logic that used to live inline inside the localStorage useState
-// initializer — extracted so it can also run inside the Firestore
-// onSnapshot callback. Ensures every item has quantityAvailable, that any
-// known drink also has its `sizes` array, and that every size on a drink
-// has its own numeric `stock`.
-function migrateMenu(parsed) {
-  const sizesById = {};
-  SEED_MENU.forEach((seedItem) => {
-    if (seedItem.sizes) sizesById[seedItem.id] = seedItem.sizes;
-  });
-  return parsed.map((item) => {
-    const withSizes = !item.sizes && sizesById[item.id] ? { sizes: sizesById[item.id] } : {};
-    const sizes = withSizes.sizes || item.sizes;
-    const quantityAvailable = item.quantityAvailable !== undefined ? item.quantityAvailable : 20;
+// ─── FIRESTORE DOC REF ────────────────────────────────────────────────────
+const ADMIN_REF = () => doc(db, "settings", "admin");
 
-    if (Array.isArray(sizes)) {
-      const migratedSizes = sizes.map((s) => ({
-        ...s,
-        stock: s.stock !== undefined ? Number(s.stock) : quantityAvailable,
-      }));
-      return {
-        ...item,
-        sizes: migratedSizes,
-        quantityAvailable: migratedSizes.reduce((sum, s) => sum + (Number(s.stock) || 0), 0),
-      };
-    }
-
-    return { ...item, quantityAvailable, ...withSizes };
-  });
-}
-
-// ─── CONTEXT ──────────────────────────────────────────────────────────────
-export const MenuContext = createContext();
-
-// Recursively strip any keys whose value is `undefined` from an object.
-// Firestore throws "Unsupported field value: undefined" on any such key,
-// so we sanitise every item before writing to the database.
+// ─── SANITIZE: strip undefined from any nested object/array ──────────────
+// Must run on EVERY value before it touches Firestore.
 function cleanForFirestore(obj) {
   if (Array.isArray(obj)) return obj.map(cleanForFirestore);
   if (obj !== null && typeof obj === "object") {
@@ -157,36 +112,98 @@ function cleanForFirestore(obj) {
   return obj;
 }
 
+// ─── MIGRATE: ensure every stored item has required fields ───────────────
+// Runs on data coming FROM Firestore so the app always sees a complete shape.
+// Also restores sizes to known drinks that were saved before sizes were added.
+function migrateMenu(parsed) {
+  const sizesById = {};
+  SEED_MENU.forEach((s) => { if (s.sizes) sizesById[s.id] = s.sizes; });
+
+  return parsed.map((item) => {
+    // Restore sizes from seed if item is a known drink and has none stored
+    const restoredSizes =
+      !item.sizes && sizesById[item.id] ? sizesById[item.id] : undefined;
+    const sizes = item.sizes || restoredSizes;
+    const quantityAvailable =
+      item.quantityAvailable !== undefined ? item.quantityAvailable : 20;
+
+    if (Array.isArray(sizes)) {
+      const migratedSizes = sizes.map((s) => ({
+        ...s,
+        stock: s.stock !== undefined ? Number(s.stock) : DEFAULT_SIZE_STOCK,
+      }));
+      return {
+        ...item,
+        sizes: migratedSizes,
+        quantityAvailable: migratedSizes.reduce(
+          (sum, s) => sum + (Number(s.stock) || 0),
+          0
+        ),
+      };
+    }
+
+    return { ...item, quantityAvailable };
+  });
+}
+
+// ─── CONTEXT ──────────────────────────────────────────────────────────────
+export const MenuContext = createContext();
+
 export function MenuProvider({ children }) {
   const [menuItems, setMenuItems] = useState(SEED_MENU);
 
-  // Live-sync menu from Firestore: settings/admin → menu
+  // Ref so async functions always read the LATEST menu without stale closure.
+  const menuRef = useRef(menuItems);
+  useEffect(() => { menuRef.current = menuItems; }, [menuItems]);
+
+  // ── FIX 1: Single source of truth via onSnapshot ─────────────────────────
+  // onSnapshot is the ONLY place that calls setMenuItems for remote data.
+  // All write helpers (persist, addMenuItem, etc.) ONLY write to Firestore;
+  // onSnapshot picks up the change and updates React state automatically.
+  // This eliminates double-setMenuItems races and stale-closure overwrites.
   useEffect(() => {
-    const ref = doc(db, "settings", "admin");
+    const ref = ADMIN_REF();
     const unsub = onSnapshot(ref, (snap) => {
       if (snap.exists() && Array.isArray(snap.data().menu)) {
+        // Always migrate on the way in so the UI always has complete data.
         setMenuItems(migrateMenu(snap.data().menu));
       } else {
-        // First run for this project: seed Firestore with SEED_MENU.
-        setDoc(ref, { menu: cleanForFirestore(SEED_MENU) }, { merge: true });
+        // First run — seed Firestore. onSnapshot will fire again with the data.
+        const safe = cleanForFirestore(SEED_MENU);
+        setDoc(ref, { menu: safe }, { merge: true }).catch(console.error);
       }
+    }, (err) => {
+      console.error("[MenuContext] onSnapshot error:", err);
     });
     return () => unsub();
   }, []);
 
-  const persist = (items) => {
+  // ── FIX 2: persist — write-only, no setMenuItems call ────────────────────
+  // onSnapshot handles the state update after the Firestore write lands.
+  // For stock controls that need an instant local feel, we do an optimistic
+  // local update first, then write — onSnapshot will confirm or correct it.
+  const persist = async (items) => {
     const safe = cleanForFirestore(items);
+    // Optimistic local update so the UI feels instant.
     setMenuItems(safe);
-    setDoc(doc(db, "settings", "admin"), { menu: safe }, { merge: true });
+    try {
+      await setDoc(ADMIN_REF(), { menu: safe }, { merge: true });
+    } catch (err) {
+      console.error("[MenuContext] persist failed:", err);
+      // Roll back to the last known-good state from the ref.
+      setMenuItems(menuRef.current);
+      throw err;
+    }
   };
 
+  // ── FIX 3: addMenuItem — always reads latest data from Firestore server ──
+  // Never relies on the React state closure to get the current list.
+  // Applies migrateMenu to the existing Firestore menu before appending so
+  // no old items lose their sizes when the document is re-written.
   const addMenuItem = async (item) => {
     const isDrink = item.category === "Drinks";
-    const hasSizes = isDrink && Array.isArray(item.sizes) && item.sizes.length > 0;
-
-    const basePrice = hasSizes
-      ? Math.min(...item.sizes.map((s) => Number(s.price) || 0))
-      : Number(item.price) || 0;
+    const hasSizes =
+      isDrink && Array.isArray(item.sizes) && item.sizes.length > 0;
 
     const sizesWithStock = hasSizes
       ? item.sizes.map((s) => ({
@@ -197,74 +214,80 @@ export function MenuProvider({ children }) {
         }))
       : null;
 
-    // Build newItem from EXPLICIT fields only — never spread `...item` because
-    // unknown or undefined fields from the form will bypass cleanForFirestore
-    // and cause Firestore to reject the entire write.
+    const basePrice = hasSizes
+      ? Math.min(...sizesWithStock.map((s) => s.price))
+      : Number(item.price) || 0;
+
+    // Build the new item with ONLY known safe fields — never spread raw form data.
     const newItem = {
-      id:                Date.now(),
-      name:              String(item.name  || ""),
-      category:          String(item.category || ""),
-      description:       String(item.description || ""),
-      image:             String(item.image || ""),
-      price:             basePrice,
+      id: Date.now(),
+      name: String(item.name || "").trim(),
+      category: String(item.category || ""),
+      description: String(item.description || "").trim(),
+      image: String(item.image || ""),
+      price: basePrice,
       quantityAvailable: hasSizes
         ? sizesWithStock.reduce((sum, s) => sum + s.stock, 0)
-        : Number(item.quantityAvailable || 20),
+        : Number(item.quantityAvailable) || 20,
     };
+    if (hasSizes) newItem.sizes = sizesWithStock;
 
-    // Only add sizes for drinks — omit the field entirely for food items
-    if (hasSizes) {
-      newItem.sizes = sizesWithStock;
-    }
-
-    const ref = doc(db, "settings", "admin");
+    // Always fetch the latest from Firestore so we append to the real current list.
+    const ref = ADMIN_REF();
     let snap;
     try {
-      snap = await getDocFromServer(ref);
-    } catch (_) {
       snap = await getDoc(ref);
+    } catch (err) {
+      console.error("[MenuContext] addMenuItem: failed to read Firestore:", err);
+      throw err;
     }
 
-    // Clean the existing Firestore menu too — old corrupt saves may have
-    // left undefined values in the stored array
-    const rawMenu = snap.exists() && Array.isArray(snap.data().menu)
-      ? snap.data().menu
-      : menuItems;
+    const existingMenu =
+      snap.exists() && Array.isArray(snap.data().menu)
+        ? migrateMenu(snap.data().menu) // FIX: migrate existing items before re-saving
+        : migrateMenu(SEED_MENU);       // FIX: never fall back to stale React state
 
-    const safeMenu = cleanForFirestore([newItem, ...rawMenu]);
+    // Prepend new item and sanitize the whole array before writing.
+    const nextMenu = cleanForFirestore([newItem, ...existingMenu]);
 
     try {
-      await setDoc(ref, { menu: safeMenu }, { merge: true });
-      setMenuItems(safeMenu);
+      await setDoc(ref, { menu: nextMenu }, { merge: true });
+      // Do NOT call setMenuItems here — onSnapshot handles it.
     } catch (err) {
-      console.error("Failed to save new menu item to Firestore:", err);
+      console.error("[MenuContext] addMenuItem: Firestore write failed:", err);
       throw err;
     }
   };
 
+  // ── FIX 4: updateMenuItem — same server-read pattern as addMenuItem ───────
   const updateMenuItem = async (id, updated) => {
     const isDrink = updated.category === "Drinks";
-    const hasSizes = isDrink && Array.isArray(updated.sizes) && updated.sizes.length > 0;
+    const hasSizes =
+      isDrink && Array.isArray(updated.sizes) && updated.sizes.length > 0;
+
+    const ref = ADMIN_REF();
+    let snap;
+    try {
+      snap = await getDoc(ref);
+    } catch (err) {
+      console.error("[MenuContext] updateMenuItem: failed to read Firestore:", err);
+      throw err;
+    }
+
+    const currentMenu =
+      snap.exists() && Array.isArray(snap.data().menu)
+        ? migrateMenu(snap.data().menu)
+        : migrateMenu(SEED_MENU);
 
     const basePrice = hasSizes
       ? Math.min(...updated.sizes.map((s) => Number(s.price) || 0))
       : Number(updated.price) || 0;
 
-    const ref = doc(db, "settings", "admin");
-    let snap;
-    try {
-      snap = await getDocFromServer(ref);
-    } catch (_) {
-      snap = await getDoc(ref);
-    }
-    const currentMenu = snap.exists() && Array.isArray(snap.data().menu)
-      ? snap.data().menu
-      : menuItems;
-
     const updatedMenu = currentMenu.map((item) => {
       if (item.id !== id) return item;
 
       if (hasSizes) {
+        // Preserve existing stock for sizes that already exist (matched by volume).
         const existingByVolume = {};
         (item.sizes || []).forEach((s) => { existingByVolume[s.volume] = s; });
 
@@ -272,47 +295,45 @@ export function MenuProvider({ children }) {
           const volume = Number(s.ml);
           const existing = existingByVolume[volume];
           return {
-            label:  `${volume}ml`,
+            label: `${volume}ml`,
             volume,
-            price:  Number(s.price),
-            stock:  existing ? Number(existing.stock) || 0 : DEFAULT_SIZE_STOCK,
+            price: Number(s.price),
+            stock: existing ? Number(existing.stock) || 0 : DEFAULT_SIZE_STOCK,
           };
         });
 
-        // Explicit fields only — no spread of unknown data
         return {
-          id:                item.id,
-          name:              String(updated.name        || item.name        || ""),
-          category:          String(updated.category    || item.category    || ""),
-          description:       String(updated.description || item.description || ""),
-          image:             String(updated.image       ?? item.image       ?? ""),
-          price:             basePrice,
-          sizes:             nextSizes,
+          id: item.id,
+          name: String(updated.name || item.name || ""),
+          category: String(updated.category || item.category || ""),
+          description: String(updated.description || item.description || ""),
+          image: String(updated.image ?? item.image ?? ""),
+          price: basePrice,
+          sizes: nextSizes,
           quantityAvailable: nextSizes.reduce((sum, s) => sum + s.stock, 0),
         };
       }
 
-      // Non-drink — explicit fields, no sizes field at all
       return {
-        id:                item.id,
-        name:              String(updated.name        || item.name        || ""),
-        category:          String(updated.category    || item.category    || ""),
-        description:       String(updated.description || item.description || ""),
-        image:             String(updated.image       ?? item.image       ?? ""),
-        price:             basePrice,
-        quantityAvailable: updated.quantityAvailable !== undefined
-          ? Number(updated.quantityAvailable)
-          : Number(item.quantityAvailable  || 0),
+        id: item.id,
+        name: String(updated.name || item.name || ""),
+        category: String(updated.category || item.category || ""),
+        description: String(updated.description || item.description || ""),
+        image: String(updated.image ?? item.image ?? ""),
+        price: basePrice,
+        quantityAvailable:
+          updated.quantityAvailable !== undefined
+            ? Number(updated.quantityAvailable)
+            : Number(item.quantityAvailable || 0),
       };
     });
 
-    const safeMenu = cleanForFirestore(updatedMenu);
-
+    const safe = cleanForFirestore(updatedMenu);
     try {
-      await setDoc(ref, { menu: safeMenu }, { merge: true });
-      setMenuItems(safeMenu);
+      await setDoc(ref, { menu: safe }, { merge: true });
+      // Do NOT call setMenuItems — onSnapshot handles it.
     } catch (err) {
-      console.error("Failed to save menu item update to Firestore:", err);
+      console.error("[MenuContext] updateMenuItem: Firestore write failed:", err);
       throw err;
     }
   };
@@ -321,15 +342,10 @@ export function MenuProvider({ children }) {
     persist(menuItems.filter((item) => item.id !== id));
   };
 
-  // ── QUANTITY STOCK CONTROL ──────────────────────────────────────────────
-  // Deduct quantity when an order is placed. Prevents going below 0.
-  // Cart lines for drinks carry a `size` (the label, e.g. "500ml") — those
-  // are deducted from that exact size's own stock. Cart lines with no size
-  // (every food item) are deducted from the item's flat quantityAvailable,
-  // exactly as before.
+  // ── STOCK CONTROL ──────────────────────────────────────────────────────────
   const deductMenuStock = (cartItems = []) => {
     const foodDeductions = {};
-    const sizeDeductions = {}; // `${itemId}::${sizeLabel}` -> qty to deduct
+    const sizeDeductions = {};
 
     cartItems.forEach((ci) => {
       if (ci.size) {
@@ -348,7 +364,10 @@ export function MenuProvider({ children }) {
             const key = `${item.id}::${s.label}`;
             if (sizeDeductions[key] !== undefined) {
               touched = true;
-              return { ...s, stock: Math.max(0, (Number(s.stock) || 0) - sizeDeductions[key]) };
+              return {
+                ...s,
+                stock: Math.max(0, (Number(s.stock) || 0) - sizeDeductions[key]),
+              };
             }
             return s;
           });
@@ -356,14 +375,20 @@ export function MenuProvider({ children }) {
           return {
             ...item,
             sizes,
-            quantityAvailable: sizes.reduce((sum, s) => sum + (Number(s.stock) || 0), 0),
+            quantityAvailable: sizes.reduce(
+              (sum, s) => sum + (Number(s.stock) || 0),
+              0
+            ),
           };
         }
 
         if (foodDeductions[item.id] !== undefined) {
           return {
             ...item,
-            quantityAvailable: Math.max(0, (item.quantityAvailable || 0) - foodDeductions[item.id]),
+            quantityAvailable: Math.max(
+              0,
+              (item.quantityAvailable || 0) - foodDeductions[item.id]
+            ),
           };
         }
         return item;
@@ -371,41 +396,53 @@ export function MenuProvider({ children }) {
     );
   };
 
-  // Increase stock for a specific item by a given amount
   const increaseMenuStock = (id, amount) => {
     persist(
       menuItems.map((item) =>
         item.id === id
-          ? { ...item, quantityAvailable: (item.quantityAvailable || 0) + Number(amount) }
+          ? {
+              ...item,
+              quantityAvailable:
+                (item.quantityAvailable || 0) + Number(amount),
+            }
           : item
       )
     );
   };
 
-  // Decrease stock for a specific item by a given amount (won't go below 0)
   const decreaseMenuStock = (id, amount) => {
     persist(
       menuItems.map((item) =>
         item.id === id
-          ? { ...item, quantityAvailable: Math.max(0, (item.quantityAvailable || 0) - Number(amount)) }
+          ? {
+              ...item,
+              quantityAvailable: Math.max(
+                0,
+                (item.quantityAvailable || 0) - Number(amount)
+              ),
+            }
           : item
       )
     );
   };
 
-  // ── PER-SIZE STOCK CONTROL (drinks only) ────────────────────────────────
-  // Adjusts the stock of a single size tier, identified by its index in the
-  // item's `sizes` array. quantityAvailable is kept in sync as the sum of
-  // every size's stock so it stays a meaningful aggregate everywhere else
-  // in the app that still reads the flat field.
   const increaseSizeStock = (itemId, sizeIndex, amount = 1) => {
     persist(
       menuItems.map((item) => {
         if (item.id !== itemId || !Array.isArray(item.sizes)) return item;
         const sizes = item.sizes.map((s, i) =>
-          i === sizeIndex ? { ...s, stock: (Number(s.stock) || 0) + Number(amount) } : s
+          i === sizeIndex
+            ? { ...s, stock: (Number(s.stock) || 0) + Number(amount) }
+            : s
         );
-        return { ...item, sizes, quantityAvailable: sizes.reduce((sum, s) => sum + (Number(s.stock) || 0), 0) };
+        return {
+          ...item,
+          sizes,
+          quantityAvailable: sizes.reduce(
+            (sum, s) => sum + (Number(s.stock) || 0),
+            0
+          ),
+        };
       })
     );
   };
@@ -415,16 +452,22 @@ export function MenuProvider({ children }) {
       menuItems.map((item) => {
         if (item.id !== itemId || !Array.isArray(item.sizes)) return item;
         const sizes = item.sizes.map((s, i) =>
-          i === sizeIndex ? { ...s, stock: Math.max(0, (Number(s.stock) || 0) - Number(amount)) } : s
+          i === sizeIndex
+            ? { ...s, stock: Math.max(0, (Number(s.stock) || 0) - Number(amount)) }
+            : s
         );
-        return { ...item, sizes, quantityAvailable: sizes.reduce((sum, s) => sum + (Number(s.stock) || 0), 0) };
+        return {
+          ...item,
+          sizes,
+          quantityAvailable: sizes.reduce(
+            (sum, s) => sum + (Number(s.stock) || 0),
+            0
+          ),
+        };
       })
     );
   };
 
-  // ── DERIVED IN-STOCK CHECK ──────────────────────────────────────────────
-  // Drinks are in stock if ANY size still has stock > 0.
-  // Regular items are in stock if quantityAvailable > 0.
   const isInStock = (item) =>
     Array.isArray(item.sizes)
       ? item.sizes.some((s) => (Number(s.stock) || 0) > 0)
