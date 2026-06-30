@@ -1,5 +1,5 @@
 import React, { createContext, useState, useEffect } from "react";
-import { doc, setDoc, onSnapshot } from "firebase/firestore";
+import { doc, getDoc, setDoc, onSnapshot } from "firebase/firestore";
 import { db } from "../firebase.js";
 
 // ─── HARDCODED SEED DATA ───────────────────────────────────────────────────
@@ -164,7 +164,7 @@ export function MenuProvider({ children }) {
     setDoc(doc(db, "settings", "admin"), { menu: items }, { merge: true });
   };
 
-  const addMenuItem = (item) => {
+  const addMenuItem = async (item) => {
     const isDrink = item.category === "Drinks";
     const hasSizes = isDrink && Array.isArray(item.sizes) && item.sizes.length > 0;
 
@@ -197,7 +197,17 @@ export function MenuProvider({ children }) {
         ? sizesWithStock.reduce((sum, s) => sum + (Number(s.stock) || 0), 0)
         : Number(item.quantityAvailable || 20),
     };
-    persist([newItem, ...menuItems]);
+
+    // Read the current menu directly from Firestore (not the local
+    // `menuItems` closure, which can be stale) so the new item is appended
+    // to what's actually persisted, then write the merged array back.
+    const ref = doc(db, "settings", "admin");
+    const snap = await getDoc(ref);
+    const currentMenu = snap.exists() && Array.isArray(snap.data().menu) ? snap.data().menu : menuItems;
+    const updatedMenu = [newItem, ...currentMenu];
+
+    setMenuItems(updatedMenu);
+    await setDoc(ref, { menu: updatedMenu }, { merge: true });
   };
 
   const updateMenuItem = (id, updated) => {
