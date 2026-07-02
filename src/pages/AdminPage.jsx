@@ -97,7 +97,7 @@ export default function AdminPage() {
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [historyFilter, setHistoryFilter] = useState("all");
   const { stock, updateStock, orders, setOrders } = useContext(CartContext);
-  const { menuItems, addMenuItem, updateMenuItem, deleteMenuItem, increaseMenuStock, decreaseMenuStock, increaseSizeStock, decreaseSizeStock } = useContext(MenuContext);
+  const { menuItems, addMenuItem, updateMenuItem, deleteMenuItem, increaseMenuStock, decreaseMenuStock, increaseSizeStock, decreaseSizeStock, categories, saveCategories } = useContext(MenuContext);
   const { feedbackList, deleteFeedback } = useContext(FeedbackContext);
   const { lowStockItems, deductOrderIngredients } = useInventory();
   // ── Seed from localStorage immediately so Admin sees choices even before backend responds ──
@@ -121,6 +121,9 @@ export default function AdminPage() {
   // ── Stock adjustment input values (itemId -> numeric string) ──────────────
   const [stockAdjust, setStockAdjust] = useState({});
   const [selectedTime, setSelectedTime] = useState({});
+  // Category manager state — local input only; list itself comes from context
+  const [newCategoryInput, setNewCategoryInput] = useState("");
+  const [categorySaving, setCategorySaving] = useState(false);
   const deliveryData = JSON.parse(localStorage.getItem("deliveryChoice")) || {};
   const prevCount = useRef(orders.length);
   const totalPayments = orders.filter(o => o.status === "confirmed").length;
@@ -1165,7 +1168,91 @@ export default function AdminPage() {
         {activeTab === "menu" && (
           <div className="space-y-6">
 
-            {/* ── ADD / EDIT FORM ─────────────────────────────────────── */}
+            {/* ── CATEGORY MANAGER ────────────────────────────────────── */}
+            {/* Add/remove categories. Changes save to Firestore instantly  */}
+            {/* and are reflected in the order form and customer menu page. */}
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+              <div className="bg-gradient-to-r from-indigo-600 to-indigo-500 px-6 py-4 flex items-center gap-3">
+                <span className="text-2xl">🗂️</span>
+                <div>
+                  <h3 className="font-bold text-white text-base leading-tight">Manage Categories</h3>
+                  <p className="text-indigo-100 text-xs mt-0.5">Add or remove menu categories. Saved to Firestore immediately.</p>
+                </div>
+              </div>
+
+              <div className="p-5">
+                {/* Current category pills */}
+                <div className="flex flex-wrap gap-2 mb-4">
+                  {categories.map((cat) => (
+                    <span
+                      key={cat}
+                      className="inline-flex items-center gap-1.5 bg-indigo-50 border border-indigo-200 text-indigo-700 text-xs font-semibold px-3 py-1.5 rounded-full"
+                    >
+                      {cat}
+                      <button
+                        onClick={async () => {
+                          const hasItems = menuItems.some((item) => item.category === cat);
+                          if (hasItems) {
+                            if (!window.confirm(`"${cat}" has menu items. Remove the category anyway? Items will keep their category label but won't appear in the filter.`)) return;
+                          }
+                          const next = categories.filter((c) => c !== cat);
+                          if (next.length === 0) { alert("You must keep at least one category."); return; }
+                          setCategorySaving(true);
+                          try { await saveCategories(next); } finally { setCategorySaving(false); }
+                        }}
+                        className="ml-0.5 text-indigo-400 hover:text-red-500 transition font-bold leading-none"
+                        title={`Remove "${cat}"`}
+                      >
+                        ×
+                      </button>
+                    </span>
+                  ))}
+                </div>
+
+                {/* Add new category */}
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    placeholder="New category name (e.g. Salads)"
+                    value={newCategoryInput}
+                    onChange={(e) => setNewCategoryInput(e.target.value)}
+                    onKeyDown={async (e) => {
+                      if (e.key !== "Enter") return;
+                      const val = newCategoryInput.trim();
+                      if (!val) return;
+                      if (categories.map((c) => c.toLowerCase()).includes(val.toLowerCase())) {
+                        alert("That category already exists."); return;
+                      }
+                      setCategorySaving(true);
+                      try { await saveCategories([...categories, val]); setNewCategoryInput(""); }
+                      finally { setCategorySaving(false); }
+                    }}
+                    className="flex-1 border border-gray-200 rounded-xl px-4 py-2.5 text-sm text-gray-800 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-transparent transition"
+                  />
+                  <button
+                    disabled={categorySaving || !newCategoryInput.trim()}
+                    onClick={async () => {
+                      const val = newCategoryInput.trim();
+                      if (!val) return;
+                      if (categories.map((c) => c.toLowerCase()).includes(val.toLowerCase())) {
+                        alert("That category already exists."); return;
+                      }
+                      setCategorySaving(true);
+                      try { await saveCategories([...categories, val]); setNewCategoryInput(""); }
+                      finally { setCategorySaving(false); }
+                    }}
+                    className={`px-5 py-2.5 text-sm font-semibold rounded-xl transition ${
+                      categorySaving || !newCategoryInput.trim()
+                        ? "bg-gray-100 text-gray-400 cursor-not-allowed"
+                        : "bg-indigo-600 text-white hover:bg-indigo-700"
+                    }`}
+                  >
+                    {categorySaving ? "Saving…" : "+ Add"}
+                  </button>
+                </div>
+                <p className="text-xs text-gray-400 mt-2">Press Enter or click "+ Add". Changes are reflected immediately on the customer order page.</p>
+              </div>
+            </div>
             <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
               <div className="bg-gradient-to-r from-green-600 to-green-500 px-6 py-4 flex items-center gap-3">
                 <span className="text-2xl">{editingMenuId ? "✏️" : "🍽️"}</span>
@@ -1209,7 +1296,7 @@ export default function AdminPage() {
                         }}
                         className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-green-400 focus:border-transparent transition"
                       >
-                        {CATEGORIES.map((cat) => <option key={cat} value={cat}>{cat}</option>)}
+                        {categories.map((cat) => <option key={cat} value={cat}>{cat}</option>)}
                       </select>
                     </div>
 
@@ -1452,7 +1539,7 @@ export default function AdminPage() {
             </div>
 
             {/* ── MENU CARDS (by category) ── */}
-            {CATEGORIES.map((cat) => {
+            {categories.map((cat) => {
               const items = menuItems.filter((item) => item.category === cat);
               if (items.length === 0) return null;
               return (

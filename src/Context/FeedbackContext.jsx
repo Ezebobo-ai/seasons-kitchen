@@ -1,32 +1,64 @@
-import React, { createContext, useState } from "react";
+import React, { createContext, useState, useEffect } from "react";
+import { db } from "../firebase.js";
+import {
+  collection,
+  addDoc,
+  deleteDoc,
+  doc,
+  onSnapshot,
+  serverTimestamp,
+  query,
+  orderBy,
+} from "firebase/firestore";
 
 export const FeedbackContext = createContext();
 
-export function FeedbackProvider({ children }) {
-  const [feedbackList, setFeedbackList] = useState(() => {
-    try {
-      const stored = localStorage.getItem("feedbackList");
-      if (stored) return JSON.parse(stored);
-    } catch (_) {}
-    return [];
-  });
+// Firestore collection reference
+const feedbackCol = collection(db, "feedback");
 
-  const submitFeedback = ({ name, message }) => {
+export function FeedbackProvider({ children }) {
+  const [feedbackList, setFeedbackList] = useState([]);
+
+  // ── Real-time listener: keeps admin view in sync across devices ──────────
+  useEffect(() => {
+    const q = query(feedbackCol, orderBy("createdAt", "desc"));
+    const unsub = onSnapshot(q, (snap) => {
+      setFeedbackList(
+        snap.docs.map((d) => ({
+          id: d.id,           // Firestore doc ID (used for deletion)
+          ...d.data(),
+          // Convert Firestore Timestamp → ISO string for consistent display
+          date: d.data().createdAt?.toDate?.()?.toISOString() ?? new Date().toISOString(),
+        }))
+      );
+    });
+    return unsub; // unsubscribe on unmount
+  }, []);
+
+  // ── Submit feedback → Firestore ──────────────────────────────────────────
+  const submitFeedback = async ({ name, message }) => {
+    const trimmedName    = (name    ?? "").trim();
+    const trimmedMessage = (message ?? "").trim();
+
+    // Guard: prevent empty submissions reaching Firestore
+    if (!trimmedMessage) return;
+
     const entry = {
-      id: Date.now(),
-      name: name.trim(),
-      message: message.trim(),
-      date: new Date().toISOString(),
+      message:   trimmedMessage,
+      createdAt: serverTimestamp(),
     };
-    const updated = [entry, ...feedbackList];
-    setFeedbackList(updated);
-    localStorage.setItem("feedbackList", JSON.stringify(updated));
+
+    // Only include customerName if a non-empty name was provided
+    if (trimmedName) entry.customerName = trimmedName;
+
+    await addDoc(feedbackCol, entry);
+    // onSnapshot above updates feedbackList automatically — no setState needed
   };
 
-  const deleteFeedback = (id) => {
-    const updated = feedbackList.filter((f) => f.id !== id);
-    setFeedbackList(updated);
-    localStorage.setItem("feedbackList", JSON.stringify(updated));
+  // ── Delete feedback entry (admin only) ───────────────────────────────────
+  const deleteFeedback = async (id) => {
+    await deleteDoc(doc(db, "feedback", id));
+    // onSnapshot handles the local state update
   };
 
   return (

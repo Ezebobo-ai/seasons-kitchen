@@ -26,16 +26,25 @@ export default function CartPage() {
   let packaging = 0;
 
 if (orderType === "Home Delivery") {
-  const nonDrinkQty = cart.reduce((sum, item) => {
-    if (item.category !== "Drinks") {
+  // 3-litre soup bowls: ₦1000 per bowl
+  const soupBowlQty = cart.reduce((sum, item) =>
+    item.category === "Soup Bowls" ? sum + Number(item.quantity || 0) : sum, 0
+  );
+
+  // All other non-drink items: ₦500 first + ₦500 each extra
+  const regularNonDrinkQty = cart.reduce((sum, item) => {
+    if (item.category !== "Drinks" && item.category !== "Soup Bowls") {
       return sum + Number(item.quantity || 0);
     }
     return sum;
   }, 0);
 
-  if (nonDrinkQty > 0) {
-    packaging = 500 + Math.max(nonDrinkQty - 1, 0) * 500;
-  }
+  const soupBowlPackaging = soupBowlQty * 1000;
+  const regularPackaging  = regularNonDrinkQty > 0
+    ? 500 + Math.max(regularNonDrinkQty - 1, 0) * 500
+    : 0;
+
+  packaging = soupBowlPackaging + regularPackaging;
 }
   const total = subtotal + vat + serviceCharge + packaging;
 
@@ -158,45 +167,60 @@ if (orderType === "Home Delivery") {
             ) : (
               <div className="divide-y divide-gray-50">
                 {cart.map((item, index) => (
-                  <div key={index} className="flex items-center gap-4 px-5 py-4">
-                    {item.image && (
-                      <img
-                        src={item.image}
-                        alt={item.name}
-                        className="w-12 h-12 rounded-xl object-cover flex-shrink-0"
-                      />
-                    )}
-                    <div className="flex-1 min-w-0">
-                      <p className="font-semibold text-gray-800 text-sm truncate">
-                        {item.name}
-                        {item.size && <span className="text-gray-400 font-normal"> ({item.size})</span>}
-                      </p>
-                      {item.description && (
-                        <p className="text-xs text-gray-400 mt-0.5 line-clamp-1">{item.description}</p>
+                  /* ── Mobile-optimised 2-row cart item ──────────────────
+                     Row 1: thumbnail + product info (name, size, unit price)
+                     Row 2: large qty controls (left) + line total (right)
+                     Prevents overflow on 320–414 px screens.          ── */
+                  <div key={index} className="px-4 py-4 space-y-3">
+
+                    {/* Row 1 — image + product info */}
+                    <div className="flex items-center gap-3">
+                      {item.image && (
+                        <img
+                          src={item.image}
+                          alt={item.name}
+                          className="w-14 h-14 rounded-xl object-cover flex-shrink-0"
+                        />
                       )}
-                      <p className="text-green-600 text-xs font-medium mt-0.5">
-                        ₦{Number(item.price).toLocaleString()} each
-                      </p>
+                      <div className="flex-1 min-w-0">
+                        <p className="font-semibold text-gray-800 text-sm leading-snug">
+                          {item.name}
+                          {item.size && (
+                            <span className="text-gray-400 font-normal"> ({item.size})</span>
+                          )}
+                        </p>
+                        {item.description && (
+                          <p className="text-xs text-gray-400 mt-0.5 line-clamp-1">
+                            {item.description}
+                          </p>
+                        )}
+                        <p className="text-green-600 text-xs font-semibold mt-1">
+                          ₦{Number(item.price).toLocaleString()} each
+                        </p>
+                      </div>
                     </div>
 
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => decreaseQty(index)}
-                        className="w-7 h-7 rounded-lg bg-red-50 border border-red-200 text-red-600 font-bold text-base flex items-center justify-center hover:bg-red-100 transition"
-                      >
-                        −
-                      </button>
-                      <span className="w-5 text-center text-sm font-bold text-gray-800">{item.quantity}</span>
-                      <button
-                        onClick={() => increaseQty(index)}
-                        className="w-7 h-7 rounded-lg bg-green-50 border border-green-200 text-green-700 font-bold text-base flex items-center justify-center hover:bg-green-100 transition"
-                      >
-                        +
-                      </button>
-                    </div>
-
-                    <div className="w-24 text-right">
-                      <span className="text-sm font-bold text-gray-800">
+                    {/* Row 2 — qty controls + line total
+                        Buttons are w-10 h-10 (40 px) for comfortable touch targets */}
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <button
+                          onClick={() => decreaseQty(index)}
+                          className="w-10 h-10 rounded-xl bg-red-50 border border-red-200 text-red-600 font-bold text-lg flex items-center justify-center hover:bg-red-100 active:scale-95 transition"
+                        >
+                          −
+                        </button>
+                        <span className="w-7 text-center text-base font-bold text-gray-800">
+                          {item.quantity}
+                        </span>
+                        <button
+                          onClick={() => increaseQty(index)}
+                          className="w-10 h-10 rounded-xl bg-green-50 border border-green-200 text-green-700 font-bold text-lg flex items-center justify-center hover:bg-green-100 active:scale-95 transition"
+                        >
+                          +
+                        </button>
+                      </div>
+                      <span className="text-base font-extrabold text-gray-900">
                         ₦{(Number(item.price) * Number(item.quantity)).toLocaleString()}
                       </span>
                     </div>
@@ -248,12 +272,13 @@ if (orderType === "Home Delivery") {
             </div>
             <div className="p-5">
               <label className="block text-xs text-gray-500 mb-1.5 font-medium">Full Name *</label>
+              {/* py-3 + text-base gives ≥44 px height and prevents iOS auto-zoom */}
               <input
                 type="text"
                 placeholder="Enter your name"
                 value={customerName}
                 onChange={(e) => setCustomerName(e.target.value)}
-                className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm text-gray-800 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-green-400"
+                className="w-full px-4 py-3 border border-gray-200 rounded-xl text-base text-gray-800 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-green-400"
               />
             </div>
           </section>

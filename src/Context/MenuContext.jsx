@@ -152,6 +152,13 @@ export const MenuContext = createContext();
 export function MenuProvider({ children }) {
   const [menuItems, setMenuItems] = useState(SEED_MENU);
 
+  // Live categories from Firestore — falls back to the hardcoded CATEGORIES
+  // constant if the document hasn't been customized yet (first deploy, no
+  // admin changes). This means the customer order page and admin form always
+  // show the same list, and any changes the admin makes are immediately
+  // visible everywhere with no extra code or page refresh.
+  const [categories, setCategories] = useState(CATEGORIES);
+
   // Ref so async functions always read the LATEST menu without stale closure.
   const menuRef = useRef(menuItems);
   useEffect(() => { menuRef.current = menuItems; }, [menuItems]);
@@ -161,14 +168,28 @@ export function MenuProvider({ children }) {
   // All write helpers (persist, addMenuItem, etc.) ONLY write to Firestore;
   // onSnapshot picks up the change and updates React state automatically.
   // This eliminates double-setMenuItems races and stale-closure overwrites.
+  // categories is read from the same document — one listener, two fields.
   useEffect(() => {
     const ref = ADMIN_REF();
     const unsub = onSnapshot(ref, (snap) => {
-      if (snap.exists() && Array.isArray(snap.data().menu)) {
-        // Always migrate on the way in so the UI always has complete data.
-        setMenuItems(migrateMenu(snap.data().menu));
+      if (snap.exists()) {
+        const data = snap.data();
+        // ── menu ──────────────────────────────────────────────────────────
+        if (Array.isArray(data.menu)) {
+          setMenuItems(migrateMenu(data.menu));
+        } else {
+          // First run — seed menu. onSnapshot will fire again with the data.
+          const safe = cleanForFirestore(SEED_MENU);
+          setDoc(ref, { menu: safe }, { merge: true }).catch(console.error);
+        }
+        // ── categories ────────────────────────────────────────────────────
+        // If the document has a categories array, use it; otherwise keep the
+        // hardcoded CATEGORIES fallback so the app works on first deploy.
+        if (Array.isArray(data.categories) && data.categories.length > 0) {
+          setCategories(data.categories);
+        }
       } else {
-        // First run — seed Firestore. onSnapshot will fire again with the data.
+        // Brand-new project — seed both menu and categories.
         const safe = cleanForFirestore(SEED_MENU);
         setDoc(ref, { menu: safe }, { merge: true }).catch(console.error);
       }
@@ -473,6 +494,30 @@ export function MenuProvider({ children }) {
       ? item.sizes.some((s) => (Number(s.stock) || 0) > 0)
       : (item.quantityAvailable ?? 0) > 0;
 
+  // ── CATEGORY MANAGEMENT ────────────────────────────────────────────────────
+  // Saves a new categories array to Firestore. Uses merge:true so it never
+  // touches the `menu` field. Optimistic local update keeps the UI instant;
+  // onSnapshot will confirm the round-trip write and correct if needed.
+  // Validates: no empty strings, no exact duplicates (case-sensitive).
+  const saveCategories = async (newCategories) => {
+    const cleaned = newCategories
+      .map((c) => String(c).trim())
+      .filter(Boolean);
+    const deduped = [...new Set(cleaned)];
+
+    // Optimistic update
+    setCategories(deduped);
+
+    try {
+      await setDoc(ADMIN_REF(), { categories: deduped }, { merge: true });
+    } catch (err) {
+      console.error("[MenuContext] saveCategories failed:", err);
+      // Revert to whatever Firestore last confirmed
+      setCategories(categories);
+      throw err;
+    }
+  };
+
   return (
     <MenuContext.Provider
       value={{
@@ -486,6 +531,12 @@ export function MenuProvider({ children }) {
         increaseSizeStock,
         decreaseSizeStock,
         isInStock,
+        // categories is the live Firestore-backed list; CATEGORIES (the
+        // constant) is kept as the hardcoded fallback in the module scope
+        // so it can still be imported directly by code that doesn't need
+        // reactivity (e.g. unit tests, seed checks).
+        categories,
+        saveCategories,
         CATEGORIES,
       }}
     >
