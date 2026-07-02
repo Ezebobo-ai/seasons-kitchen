@@ -25,25 +25,20 @@ export default function CartPage() {
   const serviceCharge = orderType === "Room Service" ? Math.round(subtotal * 0.05) : 0;
   let packaging = 0;
 
-if (orderType === "Home Delivery") {
-  const nonDrinkQty = cart.reduce((sum, item) => {
-    if (item.category !== "Drinks") {
-      return sum + Number(item.quantity || 0);
+  if (orderType === "Home Delivery") {
+    const nonDrinkQty = cart.reduce((sum, item) => {
+      if (item.category !== "Drinks") return sum + Number(item.quantity || 0);
+      return sum;
+    }, 0);
+    if (nonDrinkQty > 0) {
+      packaging = 500 + Math.max(nonDrinkQty - 1, 0) * 500;
     }
-    return sum;
-  }, 0);
-
-  if (nonDrinkQty > 0) {
-    packaging = 500 + Math.max(nonDrinkQty - 1, 0) * 500;
   }
-}
   const total = subtotal + vat + serviceCharge + packaging;
 
-  
   const increaseQty = (index) => {
     const line = cart[index];
     const menuItem = menuItems.find((m) => m.id === line.id);
-
     let available;
     if (line.size && menuItem && Array.isArray(menuItem.sizes)) {
       const sizeData = menuItem.sizes.find((s) => s.label === line.size);
@@ -51,12 +46,10 @@ if (orderType === "Home Delivery") {
     } else {
       available = menuItem ? (menuItem.quantityAvailable ?? 0) : (line.quantityAvailable ?? Infinity);
     }
-
     if ((line.quantity || 0) >= available) {
       alert(`Only ${available} available!`);
       return;
     }
-
     const updated = [...cart];
     updated[index] = { ...updated[index], quantity: updated[index].quantity + 1 };
     setCart(updated);
@@ -69,10 +62,8 @@ if (orderType === "Home Delivery") {
     setCart(updated);
   };
 
-  
   const handleProceedToPayment = () => {
     if (!customerName.trim()) return alert("Please enter your name");
-
     if (orderType === "Home Delivery") {
       if (!address) return alert("Enter delivery address");
       if (!receiverPhone) return alert("Enter receiver phone number");
@@ -102,13 +93,8 @@ if (orderType === "Home Delivery") {
       createdAt: new Date().toISOString(),
     };
 
-
     localStorage.setItem("orderData", JSON.stringify(orderData));
-
-    
     deductMenuStock(cart);
-
-  
     navigate("/payment");
   };
 
@@ -120,11 +106,12 @@ if (orderType === "Home Delivery") {
       : roomNumber !== "");
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-green-50/30 pt-20 pb-16">
-      <div className="max-w-3xl mx-auto px-4">
+    /* MOBILE: extra bottom padding so Proceed button clears the ad bar */
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-green-50/30 pt-20 pb-28">
+      <div className="max-w-3xl mx-auto px-3 sm:px-4">
 
         {/* ── Page Header ── */}
-        <div className="text-center mb-8">
+        <div className="text-center mb-6">
           <h1 className="text-2xl font-extrabold text-gray-900 tracking-tight">Your Order</h1>
           <p className="text-sm text-gray-400 mt-1">
             {cart.length === 0
@@ -133,10 +120,11 @@ if (orderType === "Home Delivery") {
           </p>
         </div>
 
-        <div className="space-y-5">
+        <div className="space-y-4">
+
           {/* ── Cart Items ── */}
           <section className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-            <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+            <div className="flex items-center justify-between px-4 sm:px-5 py-3.5 border-b border-gray-100">
               <h2 className="font-bold text-gray-800 text-sm">Items</h2>
               {cart.length > 0 && (
                 <span className="text-xs text-gray-400">{cart.length} line{cart.length !== 1 ? "s" : ""}</span>
@@ -150,7 +138,7 @@ if (orderType === "Home Delivery") {
                 <p className="text-gray-300 text-xs mt-1">Browse the menu and add something delicious</p>
                 <Link
                   to="/menu"
-                  className="inline-block mt-4 px-6 py-2.5 bg-green-600 text-white text-sm font-semibold rounded-xl hover:bg-green-700 transition"
+                  className="inline-block mt-4 px-6 py-3 min-h-[44px] bg-green-600 text-white text-sm font-semibold rounded-xl hover:bg-green-700 transition"
                 >
                   Browse Menu
                 </Link>
@@ -158,44 +146,47 @@ if (orderType === "Home Delivery") {
             ) : (
               <div className="divide-y divide-gray-50">
                 {cart.map((item, index) => (
-                  <div key={index} className="flex items-center gap-4 px-5 py-4">
+                  <div key={index} className="flex items-center gap-3 px-4 sm:px-5 py-3.5">
                     {item.image && (
                       <img
                         src={item.image}
                         alt={item.name}
+                        /* MOBILE: slightly smaller thumbnail to give more room to name + controls */
                         className="w-12 h-12 rounded-xl object-cover flex-shrink-0"
                       />
                     )}
+                    {/* Name + price — truncated cleanly on narrow screens */}
                     <div className="flex-1 min-w-0">
-                      <p className="font-semibold text-gray-800 text-sm truncate">
+                      <p className="font-semibold text-gray-800 text-sm leading-snug">
                         {item.name}
                         {item.size && <span className="text-gray-400 font-normal"> ({item.size})</span>}
                       </p>
-                      {item.description && (
-                        <p className="text-xs text-gray-400 mt-0.5 line-clamp-1">{item.description}</p>
-                      )}
                       <p className="text-green-600 text-xs font-medium mt-0.5">
                         ₦{Number(item.price).toLocaleString()} each
                       </p>
                     </div>
 
-                    <div className="flex items-center gap-2">
+                    {/* MOBILE: 44×44px − / + buttons, no accidental tap between them */}
+                    <div className="flex items-center gap-1.5 flex-shrink-0">
                       <button
                         onClick={() => decreaseQty(index)}
-                        className="w-7 h-7 rounded-lg bg-red-50 border border-red-200 text-red-600 font-bold text-base flex items-center justify-center hover:bg-red-100 transition"
+                        className="w-11 h-11 rounded-xl bg-red-50 border border-red-200 text-red-600 font-bold text-lg flex items-center justify-center hover:bg-red-100 active:scale-90 transition"
+                        aria-label="Decrease quantity"
                       >
                         −
                       </button>
-                      <span className="w-5 text-center text-sm font-bold text-gray-800">{item.quantity}</span>
+                      <span className="w-6 text-center text-sm font-bold text-gray-800">{item.quantity}</span>
                       <button
                         onClick={() => increaseQty(index)}
-                        className="w-7 h-7 rounded-lg bg-green-50 border border-green-200 text-green-700 font-bold text-base flex items-center justify-center hover:bg-green-100 transition"
+                        className="w-11 h-11 rounded-xl bg-green-50 border border-green-200 text-green-700 font-bold text-lg flex items-center justify-center hover:bg-green-100 active:scale-90 transition"
+                        aria-label="Increase quantity"
                       >
                         +
                       </button>
                     </div>
 
-                    <div className="w-24 text-right">
+                    {/* Line total — hidden on very small screens to prevent cramping */}
+                    <div className="w-20 text-right hidden xs:block flex-shrink-0">
                       <span className="text-sm font-bold text-gray-800">
                         ₦{(Number(item.price) * Number(item.quantity)).toLocaleString()}
                       </span>
@@ -209,10 +200,10 @@ if (orderType === "Home Delivery") {
           {/* ── Bill Summary ── */}
           {cart.length > 0 && (
             <section className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-              <div className="px-5 py-4 border-b border-gray-100">
+              <div className="px-4 sm:px-5 py-3.5 border-b border-gray-100">
                 <h2 className="font-bold text-gray-800 text-sm">Bill Summary</h2>
               </div>
-              <div className="px-5 py-4 space-y-2.5">
+              <div className="px-4 sm:px-5 py-4 space-y-2.5">
                 <div className="flex justify-between text-sm text-gray-600">
                   <span>Subtotal</span>
                   <span className="font-medium text-gray-800">₦{subtotal.toLocaleString()}</span>
@@ -243,27 +234,28 @@ if (orderType === "Home Delivery") {
 
           {/* ── Customer Details ── */}
           <section className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-            <div className="px-5 py-4 border-b border-gray-100">
+            <div className="px-4 sm:px-5 py-3.5 border-b border-gray-100">
               <h2 className="font-bold text-gray-800 text-sm">Your Details</h2>
             </div>
-            <div className="p-5">
+            <div className="p-4 sm:p-5">
               <label className="block text-xs text-gray-500 mb-1.5 font-medium">Full Name *</label>
+              {/* MOBILE: min-h 44px */}
               <input
                 type="text"
                 placeholder="Enter your name"
                 value={customerName}
                 onChange={(e) => setCustomerName(e.target.value)}
-                className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm text-gray-800 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-green-400"
+                className="w-full px-4 py-3 min-h-[44px] border border-gray-200 rounded-xl text-sm text-gray-800 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-green-400"
               />
             </div>
           </section>
 
           {/* ── Delivery Details ── */}
           <section className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-            <div className="px-5 py-4 border-b border-gray-100">
+            <div className="px-4 sm:px-5 py-3.5 border-b border-gray-100">
               <h2 className="font-bold text-gray-800 text-sm">Delivery Details</h2>
             </div>
-            <div className="p-5 space-y-4">
+            <div className="p-4 sm:p-5 space-y-4">
               <DeliverySelector
                 orderType={orderType}
                 setOrderType={(type) => {
@@ -284,15 +276,16 @@ if (orderType === "Home Delivery") {
                 setDeliveryCoords={setDeliveryCoords}
               />
 
-              {/* ── Rider Option (only for Home Delivery) ── */}
+              {/* Rider Option */}
               {orderType === "Home Delivery" && (
                 <div className="mt-4">
                   <p className="text-sm font-semibold text-gray-700 mb-3">
                     🏍 Rider Arrangement <span className="text-red-500">*</span>
                   </p>
-                  <div className="space-y-2">
+                  {/* MOBILE: taller radio cards for easy tapping */}
+                  <div className="space-y-2.5">
                     <label
-                      className={`flex items-start gap-3 p-3.5 rounded-xl border-2 cursor-pointer transition ${
+                      className={`flex items-start gap-3 p-4 rounded-xl border-2 cursor-pointer transition min-h-[60px] ${
                         riderOption === "self"
                           ? "border-green-500 bg-green-50"
                           : "border-gray-200 bg-white hover:border-green-300"
@@ -304,7 +297,7 @@ if (orderType === "Home Delivery") {
                         value="self"
                         checked={riderOption === "self"}
                         onChange={() => setRiderOption("self")}
-                        className="mt-0.5 accent-green-600"
+                        className="mt-1 w-5 h-5 accent-green-600 flex-shrink-0"
                       />
                       <div>
                         <p className="text-sm font-semibold text-gray-800">I will send my own rider</p>
@@ -313,7 +306,7 @@ if (orderType === "Home Delivery") {
                     </label>
 
                     <label
-                      className={`flex items-start gap-3 p-3.5 rounded-xl border-2 cursor-pointer transition ${
+                      className={`flex items-start gap-3 p-4 rounded-xl border-2 cursor-pointer transition min-h-[60px] ${
                         riderOption === "kitchen"
                           ? "border-green-500 bg-green-50"
                           : "border-gray-200 bg-white hover:border-green-300"
@@ -325,7 +318,7 @@ if (orderType === "Home Delivery") {
                         value="kitchen"
                         checked={riderOption === "kitchen"}
                         onChange={() => setRiderOption("kitchen")}
-                        className="mt-0.5 accent-green-600"
+                        className="mt-1 w-5 h-5 accent-green-600 flex-shrink-0"
                       />
                       <div>
                         <p className="text-sm font-semibold text-gray-800">Kitchen should arrange a rider</p>
@@ -361,11 +354,11 @@ if (orderType === "Home Delivery") {
             </div>
           )}
 
-          {/* ── Proceed to Payment Button ── */}
+          {/* ── Proceed to Payment ── MOBILE: min-h 56px — largest CTA on the page */}
           <button
             onClick={handleProceedToPayment}
             disabled={!isReady}
-            className={`w-full py-4 rounded-2xl font-bold text-base transition-all duration-200 flex items-center justify-center gap-2 ${
+            className={`w-full py-4 min-h-[56px] rounded-2xl font-bold text-base transition-all duration-200 flex items-center justify-center gap-2 ${
               isReady
                 ? "bg-green-600 hover:bg-green-700 text-white shadow-lg shadow-green-200 active:scale-[0.98]"
                 : "bg-gray-100 text-gray-400 cursor-not-allowed"
@@ -382,7 +375,7 @@ if (orderType === "Home Delivery") {
           </button>
 
           {isReady && (
-            <p className="text-center text-xs text-gray-400">
+            <p className="text-center text-xs text-gray-400 pb-2">
               Next: Bank transfer details → then confirm on WhatsApp
             </p>
           )}

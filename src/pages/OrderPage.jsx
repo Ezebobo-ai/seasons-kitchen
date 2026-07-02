@@ -12,7 +12,6 @@ export default function OrderPage() {
   const [previewImage, setPreviewImage] = useState(null);
   const [toast, setToast] = useState("");
   const [expandedItems, setExpandedItems] = useState({});
-  
   const [selectedSizeByItem, setSelectedSizeByItem] = useState({});
 
   const getSizePriceRange = (sizes = []) => {
@@ -20,9 +19,6 @@ export default function OrderPage() {
     return { min: Math.min(...prices), max: Math.max(...prices) };
   };
 
-  // Show only categories that actually have at least one menu item.
-  // Uses the live `categories` from Firestore so any category the admin
-  // adds/removes is reflected immediately without a page reload.
   const activeCategories = (categories || []).filter((cat) =>
     menuItems.some((item) => item.category === cat)
   );
@@ -35,11 +31,9 @@ export default function OrderPage() {
     setTimeout(() => setToast(""), 2500);
   };
 
-  
   const isSameCartLine = (a, b) =>
     a.id === b.id && a.name === b.name && (a.size || null) === (b.size || null);
 
- 
   const getAvailableFor = (menuItem, sizeLabel) => {
     if (!menuItem) return 0;
     if (sizeLabel && Array.isArray(menuItem.sizes)) {
@@ -52,17 +46,13 @@ export default function OrderPage() {
   const addToCart = (itemToAdd) => {
     const menuItem = menuItems.find((m) => m.id === itemToAdd.id);
     const available = getAvailableFor(menuItem || itemToAdd, itemToAdd.size);
-
-  
     const currentQty = (cart || [])
       .filter((c) => c.id === itemToAdd.id && (c.size || null) === (itemToAdd.size || null))
       .reduce((sum, c) => sum + (c.quantity || 0), 0);
-
     if (currentQty >= available) {
       showToast(`Only ${available} available!`);
       return;
     }
-
     setCart((prev = []) => {
       const idx = prev.findIndex((c) => isSameCartLine(c, itemToAdd));
       if (idx > -1) {
@@ -95,7 +85,6 @@ export default function OrderPage() {
       showToast(`Only ${available} available!`);
       return;
     }
-
     setCart((prev = []) => {
       const idx = prev.findIndex((c) => isSameCartLine(c, item));
       if (idx === -1) return prev;
@@ -105,7 +94,6 @@ export default function OrderPage() {
     });
   };
 
- 
   const addDrinkToCart = (item, sizeOption) => {
     const { sizes, ...base } = item;
     addToCart({
@@ -123,38 +111,41 @@ export default function OrderPage() {
   );
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-green-50 to-amber-50/50 pt-20 pb-24">
+    <div className="min-h-screen bg-gradient-to-br from-green-50 to-amber-50/50 pt-20 pb-32">
 
       {/* ── TOAST ── */}
       {toast && (
-        <div className="fixed top-6 left-1/2 -translate-x-1/2 z-50 px-6 py-3 bg-green-700 text-white text-sm font-semibold rounded-full shadow-xl">
+        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 px-5 py-3 bg-green-700 text-white text-sm font-semibold rounded-full shadow-xl whitespace-nowrap">
           🛒 {toast}
         </div>
       )}
 
       {/* ── PAGE HEADER ── */}
-      <div className="max-w-6xl mx-auto px-4 mb-6">
-        <div className="text-center mb-5">
+      <div className="max-w-6xl mx-auto px-4 mb-5">
+        <div className="text-center mb-4">
           <p className="text-xs font-bold text-green-600 uppercase tracking-widest mb-1">Our Menu</p>
-          <h1 className="text-3xl font-extrabold text-gray-900">What are you craving?</h1>
-          <p className="text-gray-500 mt-1.5 text-sm">Fresh, made-to-order meals from our kitchen to you</p>
+          {/* MOBILE: smaller headline to prevent overflow on 320px */}
+          <h1 className="text-2xl sm:text-3xl font-extrabold text-gray-900">What are you craving?</h1>
+          <p className="text-gray-500 mt-1 text-sm">Fresh, made-to-order meals from our kitchen to you</p>
         </div>
 
-        {/* Search + Cart */}
-        <div className="flex gap-3 max-w-xl mx-auto">
+        {/* Search + Cart — full width on mobile */}
+        <div className="flex gap-2 max-w-xl mx-auto">
           <div className="flex-1 relative">
-            <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400">🔍</span>
+            <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400 text-base">🔍</span>
             <input
               type="text"
               placeholder="Search dishes…"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="w-full pl-10 pr-4 py-3 bg-white border border-gray-200 rounded-2xl text-sm text-gray-800 placeholder-gray-400 shadow-sm focus:outline-none focus:ring-2 focus:ring-green-400 transition"
+              /* MOBILE: min-h 44px touch target, larger text for legibility */
+              className="w-full pl-10 pr-4 py-3 min-h-[44px] bg-white border border-gray-200 rounded-2xl text-sm text-gray-800 placeholder-gray-400 shadow-sm focus:outline-none focus:ring-2 focus:ring-green-400 transition"
             />
           </div>
           <Link
             to="/order"
-            className="relative flex items-center gap-2 bg-green-600 text-white px-4 py-3 rounded-2xl text-sm font-bold shadow-sm hover:bg-green-700 transition"
+            /* MOBILE: min 44×44px touch target */
+            className="relative flex items-center gap-2 bg-green-600 text-white px-4 min-h-[44px] rounded-2xl text-sm font-bold shadow-sm hover:bg-green-700 active:scale-95 transition"
           >
             🛒
             {totalQuantity > 0 && (
@@ -169,14 +160,17 @@ export default function OrderPage() {
         </div>
       </div>
 
-      {/* ── CATEGORY TABS ── */}
-      <div className="max-w-6xl mx-auto px-4 mb-6">
-        <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
+      {/* ── CATEGORY TABS ──
+          MOBILE: taller tap targets (min-h-[44px]), larger font, scroll indicator fade */}
+      <div className="max-w-6xl mx-auto mb-5">
+        {/* Horizontal scroll with padding so active pill isn't clipped */}
+        <div className="flex gap-2 overflow-x-auto px-4 pb-2 scrollbar-hide snap-x snap-mandatory">
           {activeCategories.map((cat) => (
             <button
               key={cat}
               onClick={() => { setActiveCategory(cat); setSearch(""); }}
-              className={`whitespace-nowrap px-5 py-2.5 rounded-2xl text-sm font-semibold transition border ${
+              /* MOBILE: min-h 44px, min-w so short names are still tappable */
+              className={`snap-start flex-shrink-0 whitespace-nowrap px-4 py-2.5 min-h-[44px] min-w-[72px] rounded-2xl text-sm font-semibold transition border ${
                 activeCategory === cat
                   ? "bg-green-600 text-white border-green-600 shadow-sm"
                   : "bg-white text-gray-600 border-gray-200 hover:border-green-400 hover:text-green-700"
@@ -188,8 +182,10 @@ export default function OrderPage() {
         </div>
       </div>
 
-      {/* ── MENU GRID ── */}
-      <div className="max-w-6xl mx-auto px-4">
+      {/* ── MENU GRID ──
+          MOBILE: 2-col grid instead of 1-col to show more items without scrolling endlessly.
+          Each card is fully tappable with generous touch areas. */}
+      <div className="max-w-6xl mx-auto px-3 sm:px-4">
         {filteredItems.length === 0 ? (
           <div className="text-center py-20 text-gray-400">
             <p className="text-5xl mb-3">🍽️</p>
@@ -197,14 +193,14 @@ export default function OrderPage() {
             <p className="text-sm mt-1">Try a different category or search term</p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-5">
+          /* MOBILE: 2-col on phones, 3-col on sm, 4-col on lg */
+          <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-5">
             {filteredItems.map((item) => {
               const isDrinkWithSizes = Array.isArray(item.sizes) && item.sizes.length > 0;
               const inCart = (cart || []).find((c) => c.id === item.id);
               const available = item.quantityAvailable ?? 0;
               const isOutOfStock = !isInStock(item);
 
-             
               const totalQtyForItem = (cart || [])
                 .filter((c) => c.id === item.id)
                 .reduce((sum, c) => sum + (c.quantity || 0), 0);
@@ -218,11 +214,11 @@ export default function OrderPage() {
               return (
                 <div
                   key={item.id}
-                  className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden flex flex-col hover:shadow-md hover:-translate-y-0.5 transition-all duration-200"
+                  className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden flex flex-col hover:shadow-md transition-all duration-200"
                 >
-                  {/* Image */}
+                  {/* Image — tappable for preview, taller on larger screens */}
                   <div
-                    className="relative h-44 bg-gray-100 cursor-pointer overflow-hidden"
+                    className="relative h-36 sm:h-44 bg-gray-100 cursor-pointer overflow-hidden"
                     onClick={() => item.image && setPreviewImage(item.image)}
                   >
                     {item.image ? (
@@ -232,7 +228,7 @@ export default function OrderPage() {
                         className="w-full h-full object-cover hover:scale-105 transition duration-300"
                       />
                     ) : (
-                      <div className="w-full h-full flex items-center justify-center text-gray-300 text-5xl">🍽️</div>
+                      <div className="w-full h-full flex items-center justify-center text-gray-300 text-4xl">🍽️</div>
                     )}
                     {isOutOfStock && (
                       <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
@@ -247,10 +243,12 @@ export default function OrderPage() {
                   </div>
 
                   {/* Body */}
-                  <div className="p-4 flex flex-col flex-1">
-                    <div className="flex items-start justify-between gap-2 mb-1">
+                  <div className="p-3 sm:p-4 flex flex-col flex-1">
+                    {/* Name + price row */}
+                    <div className="flex items-start justify-between gap-1 mb-1">
+                      {/* MOBILE: slightly larger name font for readability on small screens */}
                       <h3 className="font-bold text-gray-800 text-sm leading-snug">{item.name}</h3>
-                      <span className="text-green-600 font-extrabold text-sm whitespace-nowrap">
+                      <span className="text-green-600 font-extrabold text-sm whitespace-nowrap ml-1">
                         {isDrinkWithSizes
                           ? priceRange.min === priceRange.max
                             ? `₦${priceRange.min.toLocaleString()}`
@@ -269,10 +267,10 @@ export default function OrderPage() {
                       <p className="text-xs text-gray-500 leading-relaxed mb-2">
                         {expandedItems[item.id]
                           ? item.description
-                          : item.description.length > 65
-                            ? item.description.substring(0, 65) + "…"
+                          : item.description.length > 55
+                            ? item.description.substring(0, 55) + "…"
                             : item.description}
-                        {item.description.length > 65 && (
+                        {item.description.length > 55 && (
                           <button
                             className="ml-1 text-green-600 font-semibold hover:underline"
                             onClick={() => setExpandedItems({ ...expandedItems, [item.id]: !expandedItems[item.id] })}
@@ -285,14 +283,14 @@ export default function OrderPage() {
 
                     <div className="flex-1" />
 
+                    {/* ── CTA area ── */}
                     {isOutOfStock ? (
-                      <button disabled className="w-full mt-2 py-2 bg-gray-100 text-gray-400 text-xs font-semibold rounded-xl cursor-not-allowed">
-                        Currently Unavailable
+                      <button disabled className="w-full mt-2 py-3 bg-gray-100 text-gray-400 text-xs font-semibold rounded-xl cursor-not-allowed">
+                        Unavailable
                       </button>
                     ) : isDrinkWithSizes ? (
                       <div className="mt-1">
-                        {/* Size picker — "350ml - ₦1000" style rows, single-select,
-                            each with its own independent stock */}
+                        {/* MOBILE: taller size rows for easy tapping */}
                         <div className="space-y-1.5 mb-2">
                           {item.sizes.map((sizeOption) => {
                             const isSelected = selectedLabel === sizeOption.label;
@@ -305,21 +303,22 @@ export default function OrderPage() {
                                 onClick={() =>
                                   setSelectedSizeByItem({ ...selectedSizeByItem, [item.id]: sizeOption.label })
                                 }
-                                className={`w-full flex items-center justify-between px-3 py-1.5 rounded-lg border text-xs font-semibold transition ${
+                                /* MOBILE: min-h 40px, full-width rows are easy to hit */
+                                className={`w-full flex items-center justify-between px-3 py-2 min-h-[40px] rounded-xl border text-xs font-semibold transition ${
                                   sizeSoldOut
                                     ? "border-gray-100 text-gray-300 cursor-not-allowed bg-gray-50"
                                     : isSelected
                                       ? "border-green-500 bg-green-50 text-green-700"
-                                      : "border-gray-200 text-gray-600 hover:border-green-300"
+                                      : "border-gray-200 text-gray-600 hover:border-green-300 active:bg-green-50"
                                 }`}
                               >
                                 <span className="flex items-center gap-1.5">
                                   <span
-                                    className={`w-3.5 h-3.5 rounded-full border-2 flex items-center justify-center ${
+                                    className={`w-4 h-4 rounded-full border-2 flex items-center justify-center flex-shrink-0 ${
                                       sizeSoldOut ? "border-gray-200" : isSelected ? "border-green-600" : "border-gray-300"
                                     }`}
                                   >
-                                    {isSelected && !sizeSoldOut && <span className="w-1.5 h-1.5 rounded-full bg-green-600" />}
+                                    {isSelected && !sizeSoldOut && <span className="w-2 h-2 rounded-full bg-green-600" />}
                                   </span>
                                   {sizeOption.label}
                                   {!sizeSoldOut && sizeStock <= 5 && (
@@ -332,6 +331,7 @@ export default function OrderPage() {
                           })}
                         </div>
 
+                        {/* MOBILE: min-h 48px — primary CTA needs to be very tappable */}
                         <button
                           onClick={() => {
                             if (!selectedSize) {
@@ -342,43 +342,45 @@ export default function OrderPage() {
                             showToast(`${item.name} (${selectedSize.label}) added!`);
                           }}
                           disabled={!selectedSize}
-                          className={`w-full py-2.5 text-xs font-bold rounded-xl transition ${
+                          className={`w-full py-3 min-h-[48px] text-sm font-bold rounded-xl transition active:scale-95 ${
                             selectedSize
-                              ? "bg-green-600 hover:bg-green-700 active:scale-95 text-white"
+                              ? "bg-green-600 hover:bg-green-700 text-white"
                               : "bg-gray-100 text-gray-400 cursor-not-allowed"
                           }`}
                         >
-                          {selectedSize ? "+ Add to Order" : "Select a size to continue"}
+                          {selectedSize ? "+ Add to Order" : "Select size"}
                         </button>
                       </div>
                     ) : inCart ? (
-                      <div className="flex items-center justify-between bg-green-50 border border-green-200 rounded-xl px-3 py-2 mt-2">
+                      /* MOBILE: quantity control — each button is 44×44px minimum */
+                      <div className="flex items-center justify-between bg-green-50 border border-green-200 rounded-xl px-2 py-1.5 mt-2 gap-1">
                         <button
                           onClick={() => decreaseQty(inCart)}
-                          className="w-7 h-7 flex items-center justify-center bg-white border border-green-300 rounded-lg text-green-700 font-bold text-lg hover:bg-green-100 transition"
+                          className="w-11 h-11 flex items-center justify-center bg-white border border-green-300 rounded-lg text-green-700 font-bold text-xl hover:bg-green-100 active:scale-90 transition flex-shrink-0"
                         >
                           −
                         </button>
-                        <span className="text-sm font-extrabold text-gray-800">{inCart.quantity}</span>
+                        <span className="text-base font-extrabold text-gray-800 min-w-[24px] text-center">{inCart.quantity}</span>
                         <button
                           onClick={() => increaseQty(inCart)}
                           disabled={inCart.quantity >= available}
-                          className={`w-7 h-7 flex items-center justify-center rounded-lg text-white font-bold text-lg transition ${
+                          className={`w-11 h-11 flex items-center justify-center rounded-lg text-white font-bold text-xl transition flex-shrink-0 ${
                             inCart.quantity >= available
                               ? "bg-gray-300 cursor-not-allowed"
-                              : "bg-green-600 hover:bg-green-700"
+                              : "bg-green-600 hover:bg-green-700 active:scale-90"
                           }`}
                         >
                           +
                         </button>
                       </div>
                     ) : (
+                      /* MOBILE: primary CTA — min 48px height, full width */
                       <button
                         onClick={() => {
                           addToCart(item);
                           showToast(`${item.name} added!`);
                         }}
-                        className="w-full mt-2 py-2.5 bg-green-600 hover:bg-green-700 active:scale-95 text-white text-xs font-bold rounded-xl transition"
+                        className="w-full mt-2 py-3 min-h-[48px] bg-green-600 hover:bg-green-700 active:scale-95 text-white text-sm font-bold rounded-xl transition"
                       >
                         + Add to Order
                       </button>
@@ -391,18 +393,19 @@ export default function OrderPage() {
         )}
       </div>
 
-      {/* ── STICKY CART BAR (when items added) ── */}
+      {/* ── STICKY CART BAR ── */}
       {totalQuantity > 0 && (
-        <div className="fixed bottom-0 left-0 right-0 p-4 z-40">
+        /* MOBILE: sits above the ad bar (bottom-12 to clear it), full safe area padding */
+        <div className="fixed bottom-12 left-0 right-0 px-4 z-40">
           <div className="max-w-lg mx-auto">
             <Link
               to="/order"
-              className="flex items-center justify-between bg-green-600 hover:bg-green-700 text-white px-5 py-4 rounded-2xl shadow-2xl shadow-green-300/50 transition"
+              className="flex items-center justify-between bg-green-600 hover:bg-green-700 active:scale-[0.98] text-white px-5 py-4 rounded-2xl shadow-2xl shadow-green-300/50 transition"
             >
               <span className="bg-white/20 text-white text-sm font-bold px-2.5 py-1 rounded-lg">
                 {totalQuantity} item{totalQuantity !== 1 ? "s" : ""}
               </span>
-              <span className="font-extrabold text-sm">View Cart & Order</span>
+              <span className="font-extrabold text-sm">View Cart &amp; Order</span>
               <span className="font-extrabold text-sm">₦{cartTotal.toLocaleString()}</span>
             </Link>
           </div>

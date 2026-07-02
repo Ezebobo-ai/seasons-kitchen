@@ -1350,7 +1350,7 @@ export default function AdminPage() {
                     {categorySaving ? "Saving…" : "+ Add"}
                   </button>
                 </div>
-                <p className="text-xs text-gray-400 mt-2">Press Enter or click "+ Add". </p>
+                <p className="text-xs text-gray-400 mt-2">Press Enter or click "+ Add". git add .</p>
               </div>
             </div>
             <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">

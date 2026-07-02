@@ -3,6 +3,22 @@
 body {
   margin: 0;
   padding-bottom: 60px;
+  /* Prevent iOS bounce scroll causing layout shifts */
+  overscroll-behavior: none;
+}
+
+/* Hide scrollbars on scroll strips (category tabs, admin nav) */
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
+/* Prevent double-tap zoom on buttons on iOS — keeps taps feeling instant */
+button, a {
+  touch-action: manipulation;
 }
 
 .bottom-ad {
@@ -14,7 +30,6 @@ body {
   color: white;
   padding: 2px;
   text-align: center;
-
   z-index: 9999; 
 }
 
