@@ -124,6 +124,9 @@ export default function AdminPage() {
   // Category manager state — local input only; list itself comes from context
   const [newCategoryInput, setNewCategoryInput] = useState("");
   const [categorySaving, setCategorySaving] = useState(false);
+  // Inline rename state: which pill is being edited, and its current draft value
+  const [editingCategory, setEditingCategory] = useState(null); // original name
+  const [editingCategoryValue, setEditingCategoryValue] = useState("");
   const deliveryData = JSON.parse(localStorage.getItem("deliveryChoice")) || {};
   const prevCount = useRef(orders.length);
   const totalPayments = orders.filter(o => o.status === "confirmed").length;
@@ -1176,35 +1179,132 @@ export default function AdminPage() {
                 <span className="text-2xl">🗂️</span>
                 <div>
                   <h3 className="font-bold text-white text-base leading-tight">Manage Categories</h3>
-                  <p className="text-indigo-100 text-xs mt-0.5">Add or remove menu categories. Saved to Firestore immediately.</p>
+                  <p className="text-indigo-100 text-xs mt-0.5">Add or remove menu categories. </p>
                 </div>
               </div>
 
               <div className="p-5">
-                {/* Current category pills */}
+                {/* Current category pills — click the name to rename inline */}
                 <div className="flex flex-wrap gap-2 mb-4">
                   {categories.map((cat) => (
                     <span
                       key={cat}
-                      className="inline-flex items-center gap-1.5 bg-indigo-50 border border-indigo-200 text-indigo-700 text-xs font-semibold px-3 py-1.5 rounded-full"
+                      className={`inline-flex items-center gap-1.5 border text-xs font-semibold px-3 py-1.5 rounded-full transition ${
+                        editingCategory === cat
+                          ? "bg-white border-indigo-400 ring-2 ring-indigo-200"
+                          : "bg-indigo-50 border-indigo-200 text-indigo-700"
+                      }`}
                     >
-                      {cat}
-                      <button
-                        onClick={async () => {
-                          const hasItems = menuItems.some((item) => item.category === cat);
-                          if (hasItems) {
-                            if (!window.confirm(`"${cat}" has menu items. Remove the category anyway? Items will keep their category label but won't appear in the filter.`)) return;
-                          }
-                          const next = categories.filter((c) => c !== cat);
-                          if (next.length === 0) { alert("You must keep at least one category."); return; }
-                          setCategorySaving(true);
-                          try { await saveCategories(next); } finally { setCategorySaving(false); }
-                        }}
-                        className="ml-0.5 text-indigo-400 hover:text-red-500 transition font-bold leading-none"
-                        title={`Remove "${cat}"`}
-                      >
-                        ×
-                      </button>
+                      {editingCategory === cat ? (
+                        /* ── Inline rename input ── */
+                        <>
+                          <input
+                            autoFocus
+                            value={editingCategoryValue}
+                            onChange={(e) => setEditingCategoryValue(e.target.value)}
+                            onKeyDown={async (e) => {
+                              if (e.key === "Escape") {
+                                setEditingCategory(null);
+                                setEditingCategoryValue("");
+                              }
+                              if (e.key === "Enter") {
+                                const newName = editingCategoryValue.trim();
+                                if (!newName || newName === cat) {
+                                  setEditingCategory(null);
+                                  setEditingCategoryValue("");
+                                  return;
+                                }
+                                if (categories.some((c) => c !== cat && c.toLowerCase() === newName.toLowerCase())) {
+                                  alert("A category with that name already exists.");
+                                  return;
+                                }
+                                setCategorySaving(true);
+                                try {
+                                  // 1. Rename in the categories list
+                                  const nextCats = categories.map((c) => (c === cat ? newName : c));
+                                  await saveCategories(nextCats);
+                                  // 2. Update every menu item that used the old name
+                                  for (const item of menuItems.filter((i) => i.category === cat)) {
+                                    await updateMenuItem(item.id, { ...item, category: newName });
+                                  }
+                                  setEditingCategory(null);
+                                  setEditingCategoryValue("");
+                                } finally {
+                                  setCategorySaving(false);
+                                }
+                              }
+                            }}
+                            className="w-28 bg-transparent text-indigo-700 font-semibold text-xs outline-none border-none"
+                          />
+                          {/* Confirm (✓) */}
+                          <button
+                            title="Save rename"
+                            onClick={async () => {
+                              const newName = editingCategoryValue.trim();
+                              if (!newName || newName === cat) {
+                                setEditingCategory(null);
+                                setEditingCategoryValue("");
+                                return;
+                              }
+                              if (categories.some((c) => c !== cat && c.toLowerCase() === newName.toLowerCase())) {
+                                alert("A category with that name already exists.");
+                                return;
+                              }
+                              setCategorySaving(true);
+                              try {
+                                const nextCats = categories.map((c) => (c === cat ? newName : c));
+                                await saveCategories(nextCats);
+                                for (const item of menuItems.filter((i) => i.category === cat)) {
+                                  await updateMenuItem(item.id, { ...item, category: newName });
+                                }
+                                setEditingCategory(null);
+                                setEditingCategoryValue("");
+                              } finally {
+                                setCategorySaving(false);
+                              }
+                            }}
+                            className="text-green-600 hover:text-green-700 font-bold leading-none transition"
+                          >
+                            ✓
+                          </button>
+                          {/* Cancel (✕) */}
+                          <button
+                            title="Cancel"
+                            onClick={() => { setEditingCategory(null); setEditingCategoryValue(""); }}
+                            className="text-gray-400 hover:text-gray-600 font-bold leading-none transition"
+                          >
+                            ✕
+                          </button>
+                        </>
+                      ) : (
+                        /* ── Normal view: click name to start editing ── */
+                        <>
+                          <button
+                            title={`Rename "${cat}"`}
+                            onClick={() => { setEditingCategory(cat); setEditingCategoryValue(cat); }}
+                            className="text-indigo-700 hover:text-indigo-900 transition"
+                          >
+                            {cat}
+                          </button>
+                          {/* Delete */}
+                          <button
+                            onClick={async () => {
+                              const hasItems = menuItems.some((item) => item.category === cat);
+                              if (hasItems) {
+                                if (!window.confirm(`"${cat}" has menu items. Remove the category anyway? Items will keep their category label but won't appear in the filter.`)) return;
+                              }
+                              const next = categories.filter((c) => c !== cat);
+                              if (next.length === 0) { alert("You must keep at least one category."); return; }
+                              setCategorySaving(true);
+                              try { await saveCategories(next); } finally { setCategorySaving(false); }
+                            }}
+                            className="ml-0.5 text-indigo-400 hover:text-red-500 transition font-bold leading-none"
+                            title={`Remove "${cat}"`}
+                          >
+                            ×
+                          </button>
+                        </>
+                      )}
                     </span>
                   ))}
                 </div>
@@ -1250,7 +1350,7 @@ export default function AdminPage() {
                     {categorySaving ? "Saving…" : "+ Add"}
                   </button>
                 </div>
-                <p className="text-xs text-gray-400 mt-2">Press Enter or click "+ Add". Changes are reflected immediately on the customer order page.</p>
+                <p className="text-xs text-gray-400 mt-2">Press Enter or click "+ Add". </p>
               </div>
             </div>
             <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
