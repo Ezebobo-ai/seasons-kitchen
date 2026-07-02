@@ -176,9 +176,7 @@ export default function OrderPage() {
             <button
               key={cat}
               onClick={() => { setActiveCategory(cat); setSearch(""); }}
-              {/* py-3 → ~40px height (up from 32px). text-xs on mobile keeps tabs compact
-                so more categories are visible in the horizontal scroll without panning far. */}
-            className={`whitespace-nowrap px-4 sm:px-5 py-3 rounded-2xl text-xs sm:text-sm font-semibold transition border ${
+              className={`whitespace-nowrap px-5 py-2.5 rounded-2xl text-sm font-semibold transition border ${
                 activeCategory === cat
                   ? "bg-green-600 text-white border-green-600 shadow-sm"
                   : "bg-white text-gray-600 border-gray-200 hover:border-green-400 hover:text-green-700"
@@ -199,9 +197,7 @@ export default function OrderPage() {
             <p className="text-sm mt-1">Try a different category or search term</p>
           </div>
         ) : (
-          {/* grid-cols-2 on mobile: more items visible per screen, faster browsing.
-              gap-3 on mobile (gap-5 on sm+) so narrow cards aren't wasted on spacing. */}
-          <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-5">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-5">
             {filteredItems.map((item) => {
               const isDrinkWithSizes = Array.isArray(item.sizes) && item.sizes.length > 0;
               const inCart = (cart || []).find((c) => c.id === item.id);
@@ -225,10 +221,8 @@ export default function OrderPage() {
                   className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden flex flex-col hover:shadow-md hover:-translate-y-0.5 transition-all duration-200"
                 >
                   {/* Image */}
-                  {/* h-32 on mobile keeps cards compact in 2-col layout;
-                      h-44 on sm+ restores the full hero image on wider screens */}
                   <div
-                    className="relative h-32 sm:h-44 bg-gray-100 cursor-pointer overflow-hidden"
+                    className="relative h-44 bg-gray-100 cursor-pointer overflow-hidden"
                     onClick={() => item.image && setPreviewImage(item.image)}
                   >
                     {item.image ? (
@@ -252,12 +246,10 @@ export default function OrderPage() {
                     )}
                   </div>
 
-                  {/* Body — p-3 on mobile to maximise content area in 2-col cards */}
-                  <div className="p-3 sm:p-4 flex flex-col flex-1">
-                    {/* flex-col on mobile: name takes full card width, price sits below.
-                        flex-row at sm+: original side-by-side layout on wider screens. */}
-                    <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between sm:gap-2 gap-0.5 mb-1">
-                      <h3 className="font-bold text-gray-800 text-sm leading-snug min-w-0">{item.name}</h3>
+                  {/* Body */}
+                  <div className="p-4 flex flex-col flex-1">
+                    <div className="flex items-start justify-between gap-2 mb-1">
+                      <h3 className="font-bold text-gray-800 text-sm leading-snug">{item.name}</h3>
                       <span className="text-green-600 font-extrabold text-sm whitespace-nowrap">
                         {isDrinkWithSizes
                           ? priceRange.min === priceRange.max
@@ -274,15 +266,13 @@ export default function OrderPage() {
                     )}
 
                     {item.description && (
-                      /* 50-char limit on mobile 2-col cards prevents 3+ wrapped lines
-                         from pushing the Add button off screen. "more" reveals the rest. */
                       <p className="text-xs text-gray-500 leading-relaxed mb-2">
                         {expandedItems[item.id]
                           ? item.description
-                          : item.description.length > 50
-                            ? item.description.substring(0, 50) + "…"
+                          : item.description.length > 65
+                            ? item.description.substring(0, 65) + "…"
                             : item.description}
-                        {item.description.length > 50 && (
+                        {item.description.length > 65 && (
                           <button
                             className="ml-1 text-green-600 font-semibold hover:underline"
                             onClick={() => setExpandedItems({ ...expandedItems, [item.id]: !expandedItems[item.id] })}
@@ -309,15 +299,13 @@ export default function OrderPage() {
                             const sizeStock = Number(sizeOption.stock) || 0;
                             const sizeSoldOut = sizeStock <= 0;
                             return (
-                              {/* py-2.5 → ~36px tap height (up from 24px py-1.5).
-                                  Critical: this is the only way to add a drink to cart. */}
                               <button
                                 key={sizeOption.label}
                                 disabled={sizeSoldOut}
                                 onClick={() =>
                                   setSelectedSizeByItem({ ...selectedSizeByItem, [item.id]: sizeOption.label })
                                 }
-                                className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg border text-xs font-semibold transition ${
+                                className={`w-full flex items-center justify-between px-3 py-1.5 rounded-lg border text-xs font-semibold transition ${
                                   sizeSoldOut
                                     ? "border-gray-100 text-gray-300 cursor-not-allowed bg-gray-50"
                                     : isSelected
@@ -344,7 +332,6 @@ export default function OrderPage() {
                           })}
                         </div>
 
-                        {/* py-3.5 → 44px tap height on the primary drink CTA */}
                         <button
                           onClick={() => {
                             if (!selectedSize) {
@@ -355,7 +342,7 @@ export default function OrderPage() {
                             showToast(`${item.name} (${selectedSize.label}) added!`);
                           }}
                           disabled={!selectedSize}
-                          className={`w-full py-3.5 text-xs font-bold rounded-xl transition ${
+                          className={`w-full py-2.5 text-xs font-bold rounded-xl transition ${
                             selectedSize
                               ? "bg-green-600 hover:bg-green-700 active:scale-95 text-white"
                               : "bg-gray-100 text-gray-400 cursor-not-allowed"
@@ -365,12 +352,10 @@ export default function OrderPage() {
                         </button>
                       </div>
                     ) : inCart ? (
-                      /* w-9 h-9 (36px) qty buttons: 29% larger than the previous 28px,
-                         much easier to tap accurately on a 165px-wide mobile card. */
                       <div className="flex items-center justify-between bg-green-50 border border-green-200 rounded-xl px-3 py-2 mt-2">
                         <button
                           onClick={() => decreaseQty(inCart)}
-                          className="w-9 h-9 flex items-center justify-center bg-white border border-green-300 rounded-lg text-green-700 font-bold text-lg hover:bg-green-100 active:scale-95 transition"
+                          className="w-7 h-7 flex items-center justify-center bg-white border border-green-300 rounded-lg text-green-700 font-bold text-lg hover:bg-green-100 transition"
                         >
                           −
                         </button>
@@ -378,23 +363,22 @@ export default function OrderPage() {
                         <button
                           onClick={() => increaseQty(inCart)}
                           disabled={inCart.quantity >= available}
-                          className={`w-9 h-9 flex items-center justify-center rounded-lg text-white font-bold text-lg transition ${
+                          className={`w-7 h-7 flex items-center justify-center rounded-lg text-white font-bold text-lg transition ${
                             inCart.quantity >= available
                               ? "bg-gray-300 cursor-not-allowed"
-                              : "bg-green-600 hover:bg-green-700 active:scale-95"
+                              : "bg-green-600 hover:bg-green-700"
                           }`}
                         >
                           +
                         </button>
                       </div>
                     ) : (
-                      /* py-3.5 → 44px tap height on the primary food CTA */
                       <button
                         onClick={() => {
                           addToCart(item);
                           showToast(`${item.name} added!`);
                         }}
-                        className="w-full mt-2 py-3.5 bg-green-600 hover:bg-green-700 active:scale-95 text-white text-xs font-bold rounded-xl transition"
+                        className="w-full mt-2 py-2.5 bg-green-600 hover:bg-green-700 active:scale-95 text-white text-xs font-bold rounded-xl transition"
                       >
                         + Add to Order
                       </button>
