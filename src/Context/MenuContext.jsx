@@ -518,6 +518,92 @@ export function MenuProvider({ children }) {
     }
   };
 
+  // Renames a category everywhere in ONE atomic operation: updates the
+  // categories list AND migrates every menu item that used the old category
+  // name to the new one, without touching any other field on those items
+  // (price, sizes, stock, image, description, etc. are left exactly as-is).
+  //
+  // This replaces the old approach used by the rename UI (save the renamed
+  // categories list, then loop and call updateMenuItem() once per item).
+  // That approach lost data for two reasons:
+  //   1. updateMenuItem() decides whether an item "hasSizes" by checking
+  //      `updated.category === "Drinks"`. Once the category was renamed to
+  //      anything else, that check went false and the rebuilt item object
+  //      simply omitted the `sizes` field — silently deleting all packaging
+  //      sizes/prices/stock for every drink in the renamed category.
+  //   2. saveCategories() and the per-item updateMenuItem() calls were
+  //      separate, sequential Firestore writes. While the loop was still
+  //      running, items still carried the OLD category name, which no
+  //      longer existed in the just-saved categories list — so any UI that
+  //      groups items by category (e.g. OrderPage) had nowhere to show them
+  //      and they appeared to "disappear".
+  //
+  // renameCategory() fixes both: it reads the menu once, renames the
+  // `category` field on the matching items via a plain object spread (so
+  // sizes/price/stock/media are copied over untouched), and writes the
+  // updated categories array and menu array together in a single setDoc.
+  const renameCategory = async (oldName, newName) => {
+    const cleanNew = String(newName || "").trim();
+    if (!cleanNew || cleanNew === oldName) return;
+
+    const ref = ADMIN_REF();
+    let snap;
+    try {
+      snap = await getDoc(ref);
+    } catch (err) {
+      console.error("[MenuContext] renameCategory: failed to read Firestore:", err);
+      throw err;
+    }
+
+    const currentMenu =
+      snap.exists() && Array.isArray(snap.data().menu)
+        ? migrateMenu(snap.data().menu)
+        : migrateMenu(menuRef.current);
+
+    const currentCategories =
+      snap.exists() &&
+      Array.isArray(snap.data().categories) &&
+      snap.data().categories.length > 0
+        ? snap.data().categories
+        : categories;
+
+    // Rename in the categories list, then clean/dedupe just like saveCategories.
+    const nextCategories = [
+      ...new Set(
+        currentCategories
+          .map((c) => (c === oldName ? cleanNew : c))
+          .map((c) => String(c).trim())
+          .filter(Boolean)
+      ),
+    ];
+
+    // Migrate every item that belonged to the old category. Only the
+    // `category` field is changed — every other property (price, sizes,
+    // stock, image, description...) is preserved exactly as it was.
+    const nextMenu = currentMenu.map((item) =>
+      item.category === oldName ? { ...item, category: cleanNew } : item
+    );
+    const safeMenu = cleanForFirestore(nextMenu);
+
+    // Optimistic local update so the UI feels instant.
+    setCategories(nextCategories);
+    setMenuItems(safeMenu);
+
+    try {
+      await setDoc(
+        ref,
+        { categories: nextCategories, menu: safeMenu },
+        { merge: true }
+      );
+      // onSnapshot will confirm the round-trip write and correct if needed.
+    } catch (err) {
+      console.error("[MenuContext] renameCategory: Firestore write failed:", err);
+      setCategories(categories);
+      setMenuItems(menuRef.current);
+      throw err;
+    }
+  };
+
   return (
     <MenuContext.Provider
       value={{
@@ -537,6 +623,7 @@ export function MenuProvider({ children }) {
         // reactivity (e.g. unit tests, seed checks).
         categories,
         saveCategories,
+        renameCategory,
         CATEGORIES,
       }}
     >

@@ -97,7 +97,7 @@ export default function AdminPage() {
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [historyFilter, setHistoryFilter] = useState("all");
   const { stock, updateStock, orders, setOrders } = useContext(CartContext);
-  const { menuItems, addMenuItem, updateMenuItem, deleteMenuItem, increaseMenuStock, decreaseMenuStock, increaseSizeStock, decreaseSizeStock, categories, saveCategories } = useContext(MenuContext);
+  const { menuItems, addMenuItem, updateMenuItem, deleteMenuItem, increaseMenuStock, decreaseMenuStock, increaseSizeStock, decreaseSizeStock, categories, saveCategories, renameCategory } = useContext(MenuContext);
   const { feedbackList, deleteFeedback } = useContext(FeedbackContext);
   const { lowStockItems, deductOrderIngredients } = useInventory();
   // ── Seed from localStorage immediately so Admin sees choices even before backend responds ──
@@ -1220,13 +1220,9 @@ export default function AdminPage() {
                                 }
                                 setCategorySaving(true);
                                 try {
-                                  // 1. Rename in the categories list
-                                  const nextCats = categories.map((c) => (c === cat ? newName : c));
-                                  await saveCategories(nextCats);
-                                  // 2. Update every menu item that used the old name
-                                  for (const item of menuItems.filter((i) => i.category === cat)) {
-                                    await updateMenuItem(item.id, { ...item, category: newName });
-                                  }
+                                  // Rename the category AND migrate every item that used the
+                                  // old name in one atomic operation (no data loss, no flicker).
+                                  await renameCategory(cat, newName);
                                   setEditingCategory(null);
                                   setEditingCategoryValue("");
                                 } finally {
@@ -1252,11 +1248,9 @@ export default function AdminPage() {
                               }
                               setCategorySaving(true);
                               try {
-                                const nextCats = categories.map((c) => (c === cat ? newName : c));
-                                await saveCategories(nextCats);
-                                for (const item of menuItems.filter((i) => i.category === cat)) {
-                                  await updateMenuItem(item.id, { ...item, category: newName });
-                                }
+                                // Rename the category AND migrate every item that used the
+                                // old name in one atomic operation (no data loss, no flicker).
+                                await renameCategory(cat, newName);
                                 setEditingCategory(null);
                                 setEditingCategoryValue("");
                               } finally {
