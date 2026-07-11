@@ -1,4 +1,4 @@
-import React, { createContext, useState, useEffect, useRef } from "react";
+import React, { createContext, useState, useEffect } from "react";
 import { doc, getDoc, setDoc, onSnapshot } from "firebase/firestore";
 import { db } from "../firebase.js";
 
@@ -159,10 +159,6 @@ export function MenuProvider({ children }) {
   // visible everywhere with no extra code or page refresh.
   const [categories, setCategories] = useState(CATEGORIES);
 
-  // Ref so async functions always read the LATEST menu without stale closure.
-  const menuRef = useRef(menuItems);
-  useEffect(() => { menuRef.current = menuItems; }, [menuItems]);
-
   // ── FIX 1: Single source of truth via onSnapshot ─────────────────────────
   // onSnapshot is the ONLY place that calls setMenuItems for remote data.
   // All write helpers (persist, addMenuItem, etc.) ONLY write to Firestore;
@@ -200,16 +196,35 @@ export function MenuProvider({ children }) {
   }, []);
 
   
-  const persist = async (items) => {
-    const safe = cleanForFirestore(items);
-    // Optimistic local update so the UI feels instant.
-    setMenuItems(safe);
+  // ── FIX: persist() now takes an UPDATER function and reads Firestore's
+  // current state immediately before writing — the same safe pattern used
+  // by addMenuItem/updateMenuItem. This closes the stale-closure race where
+  // a write built from an old in-memory `menuItems` snapshot could overwrite
+  // (and silently revert) changes made moments earlier by this admin, another
+  // admin tab, or a customer's checkout. onSnapshot remains the only place
+  // that calls setMenuItems for remote data — persist() never does.
+  const persist = async (updater) => {
+    const ref = ADMIN_REF();
+    let snap;
     try {
-      await setDoc(ADMIN_REF(), { menu: safe }, { merge: true });
+      snap = await getDoc(ref);
+    } catch (err) {
+      console.error("[MenuContext] persist: failed to read Firestore:", err);
+      throw err;
+    }
+
+    const currentMenu =
+      snap.exists() && Array.isArray(snap.data().menu)
+        ? migrateMenu(snap.data().menu)
+        : migrateMenu(SEED_MENU);
+
+    const nextMenu = cleanForFirestore(updater(currentMenu));
+
+    try {
+      await setDoc(ref, { menu: nextMenu }, { merge: true });
+      // Do NOT call setMenuItems here — onSnapshot handles it.
     } catch (err) {
       console.error("[MenuContext] persist failed:", err);
-      // Roll back to the last known-good state from the ref.
-      setMenuItems(menuRef.current);
       throw err;
     }
   };
@@ -354,7 +369,7 @@ export function MenuProvider({ children }) {
   };
 
   const deleteMenuItem = (id) => {
-    persist(menuItems.filter((item) => item.id !== id));
+    persist((current) => current.filter((item) => item.id !== id));
   };
 
   // ── STOCK CONTROL ──────────────────────────────────────────────────────────
@@ -371,8 +386,8 @@ export function MenuProvider({ children }) {
       }
     });
 
-    persist(
-      menuItems.map((item) => {
+    persist((current) =>
+      current.map((item) => {
         if (Array.isArray(item.sizes) && item.sizes.length > 0) {
           let touched = false;
           const sizes = item.sizes.map((s) => {
@@ -412,8 +427,8 @@ export function MenuProvider({ children }) {
   };
 
   const increaseMenuStock = (id, amount) => {
-    persist(
-      menuItems.map((item) =>
+    persist((current) =>
+      current.map((item) =>
         item.id === id
           ? {
               ...item,
@@ -426,8 +441,8 @@ export function MenuProvider({ children }) {
   };
 
   const decreaseMenuStock = (id, amount) => {
-    persist(
-      menuItems.map((item) =>
+    persist((current) =>
+      current.map((item) =>
         item.id === id
           ? {
               ...item,
@@ -442,8 +457,8 @@ export function MenuProvider({ children }) {
   };
 
   const increaseSizeStock = (itemId, sizeIndex, amount = 1) => {
-    persist(
-      menuItems.map((item) => {
+    persist((current) =>
+      current.map((item) => {
         if (item.id !== itemId || !Array.isArray(item.sizes)) return item;
         const sizes = item.sizes.map((s, i) =>
           i === sizeIndex
@@ -463,8 +478,8 @@ export function MenuProvider({ children }) {
   };
 
   const decreaseSizeStock = (itemId, sizeIndex, amount = 1) => {
-    persist(
-      menuItems.map((item) => {
+    persist((current) =>
+      current.map((item) => {
         if (item.id !== itemId || !Array.isArray(item.sizes)) return item;
         const sizes = item.sizes.map((s, i) =>
           i === sizeIndex

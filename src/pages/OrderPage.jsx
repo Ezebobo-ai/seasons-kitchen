@@ -303,8 +303,8 @@ export default function OrderPage() {
                                 onClick={() =>
                                   setSelectedSizeByItem({ ...selectedSizeByItem, [item.id]: sizeOption.label })
                                 }
-                                /* MOBILE: min-h 40px, full-width rows are easy to hit */
-                                className={`w-full flex items-center justify-between px-3 py-2 min-h-[40px] rounded-xl border text-xs font-semibold transition ${
+                                /* MOBILE: min-h 44px, full-width rows are easy to hit */
+                                className={`w-full flex items-center justify-between px-3 py-2 min-h-[44px] rounded-xl border text-xs font-semibold transition ${
                                   sizeSoldOut
                                     ? "border-gray-100 text-gray-300 cursor-not-allowed bg-gray-50"
                                     : isSelected

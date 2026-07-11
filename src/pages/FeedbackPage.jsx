@@ -8,17 +8,25 @@ export default function FeedbackPage() {
   const [message, setMessage] = useState("");
   const [submitted, setSubmitted] = useState(false);
   const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!name.trim() || !message.trim()) {
       setError("Please fill in your name and message.");
       return;
     }
-    submitFeedback({ name, message });
-    setName("");
-    setMessage("");
+    setSubmitting(true);
     setError("");
-    setSubmitted(true);
+    try {
+      await submitFeedback({ name, message });
+      setName("");
+      setMessage("");
+      setSubmitted(true);
+    } catch {
+      setError("❌ Couldn't send your feedback — please check your connection and try again.");
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   if (submitted) {
@@ -92,9 +100,10 @@ export default function FeedbackPage() {
           {/* Submit */}
           <button
             onClick={handleSubmit}
-            className="w-full bg-green-600 hover:bg-green-700 text-white font-semibold py-3 rounded-xl text-sm transition shadow-sm"
+            disabled={submitting}
+            className="w-full bg-green-600 hover:bg-green-700 disabled:opacity-60 disabled:cursor-not-allowed text-white font-semibold py-3 rounded-xl text-sm transition shadow-sm"
           >
-            Submit Feedback
+            {submitting ? "Sending…" : "Submit Feedback"}
           </button>
         </div>
 

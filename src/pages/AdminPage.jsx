@@ -26,6 +26,7 @@ import InventoryTab from "../components/InventoryTab.jsx";
 import MarketTab from "../components/MarketTab.jsx";
 import RevenueBreakdownModal from "../components/RevenueBreakdownModal.jsx";
 import { useInventory } from "../Context/InventoryContext.jsx";
+import { uploadFileToStorage } from "../utils/storageUpload.js";
 import { exportAnalyticsCsv } from "../utils/reportExport.js";
 import {
   sendOrderReceiptWhatsApp,
@@ -45,10 +46,12 @@ const StatCard = ({ label, value, sub, color = "text-gray-900", accent }) => (
   </div>
 );
 
+// MOBILE: min-h-[44px] so every tab meets the minimum touch target size.
+// flex-shrink-0 + whitespace-nowrap so tabs never squash when the strip scrolls.
 const TabBtn = ({ id, label, active, onClick, badge }) => (
   <button
     onClick={() => onClick(id)}
-    className={`relative px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+    className={`relative px-4 min-h-[44px] flex-shrink-0 whitespace-nowrap flex items-center justify-center rounded-lg text-xs font-semibold transition-all ${
       active ? "bg-green-600 text-white shadow-sm" : "bg-gray-100 text-gray-600 hover:bg-gray-200"
     }`}
   >
@@ -113,6 +116,7 @@ export default function AdminPage() {
   const [menuForm, setMenuForm] = useState(EMPTY_FORM);
   const [drinkSizes, setDrinkSizes] = useState([EMPTY_SIZE()]);
   const [menuImagePreview, setMenuImagePreview] = useState(null);
+  const [uploadingMenuImage, setUploadingMenuImage] = useState(false);
   const [editingMenuId, setEditingMenuId] = useState(null);
   const [savingMenuItem, setSavingMenuItem] = useState(false);
   const [rejectOrderData, setRejectOrderData] = useState(null);
@@ -445,7 +449,10 @@ export default function AdminPage() {
               <p className="text-xs text-gray-400 hidden sm:block">Admin Dashboard</p>
             </div>
           </div>
-          <div className="flex gap-1.5 flex-wrap justify-end items-center">
+          {/* MOBILE: horizontal scroll strip instead of a wrapping row — on
+              narrow screens the 7 tabs no longer stack into cramped multiple
+              lines; they swipe left/right in one row with 44px touch targets. */}
+          <div className="flex gap-1.5 items-center overflow-x-auto no-scrollbar -mx-1 px-1 max-w-full">
             {[
               { id: "analytics", label: "Analytics" },
               { id: "stock",     label: "Stock" },
@@ -466,7 +473,7 @@ export default function AdminPage() {
             ))}
             <Link
               to="/admin/settings"
-              className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-gray-100 text-gray-600 hover:bg-gray-200 transition"
+              className="px-3 min-h-[44px] flex-shrink-0 whitespace-nowrap flex items-center justify-center rounded-lg text-xs font-semibold bg-gray-100 text-gray-600 hover:bg-gray-200 transition"
             >
               ⚙️ Settings
             </Link>
@@ -692,10 +699,11 @@ export default function AdminPage() {
                               </span>
                             </div>
                             <div className="flex items-center gap-1.5">
+                              {/* MOBILE: 44×44px minimum touch target */}
                               <button
                                 onClick={() => decreaseSizeStock(item.id, sizeIndex, 1)}
                                 disabled={sizeStock <= 0}
-                                className={`w-8 h-8 flex items-center justify-center rounded-lg text-sm font-bold transition ${
+                                className={`w-11 h-11 flex items-center justify-center rounded-lg text-sm font-bold transition active:scale-90 ${
                                   sizeStock <= 0
                                     ? "bg-gray-100 text-gray-300 cursor-not-allowed"
                                     : "bg-red-100 text-red-600 hover:bg-red-200"
@@ -706,7 +714,7 @@ export default function AdminPage() {
                               </button>
                               <button
                                 onClick={() => increaseSizeStock(item.id, sizeIndex, 1)}
-                                className="w-8 h-8 flex items-center justify-center bg-green-600 text-white rounded-lg text-sm font-bold hover:bg-green-700 transition"
+                                className="w-11 h-11 flex items-center justify-center bg-green-600 text-white rounded-lg text-sm font-bold hover:bg-green-700 active:scale-90 transition"
                                 title={`Add ${sizeOption.label} stock`}
                               >
                                 +
@@ -1510,9 +1518,15 @@ export default function AdminPage() {
                       {(menuImagePreview || menuForm.image) ? (
                         <>
                           <img src={menuImagePreview || menuForm.image} alt="preview" className="w-full h-full object-cover absolute inset-0" />
-                          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition flex items-center justify-center">
-                            <span className="text-white text-sm font-semibold">Click to change</span>
-                          </div>
+                          {uploadingMenuImage ? (
+                            <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
+                              <span className="text-white text-sm font-semibold">Uploading…</span>
+                            </div>
+                          ) : (
+                            <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition flex items-center justify-center">
+                              <span className="text-white text-sm font-semibold">Click to change</span>
+                            </div>
+                          )}
                         </>
                       ) : (
                         <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-gray-400">
@@ -1527,15 +1541,40 @@ export default function AdminPage() {
                       type="file"
                       accept="image/*"
                       className="hidden"
-                      onChange={(e) => {
+                      onChange={async (e) => {
                         const file = e.target.files[0];
+                        e.target.value = ""; // allow re-selecting the same file later
                         if (!file) return;
-                        const reader = new FileReader();
-                        reader.onload = () => {
-                          setMenuImagePreview(reader.result);
-                          setMenuForm({ ...menuForm, image: reader.result });
-                        };
-                        reader.readAsDataURL(file);
+
+                        // FIX: previously this read the raw file into a base64
+                        // string and stored it directly on the menu item, which
+                        // then got written into the SAME Firestore document as
+                        // the entire menu array (1MB hard limit). A desktop
+                        // admin picking a small pre-sized image could sneak
+                        // under that limit; a phone camera photo (often 3–12MB)
+                        // could not — so saving "always failed" on mobile.
+                        // Now the file goes to Firebase Storage and only its
+                        // URL (a short string) is stored on the item.
+                        if (file.size > 15 * 1024 * 1024) {
+                          alert("❌ Image is too large (max 15MB). Please choose a smaller photo.");
+                          return;
+                        }
+
+                        // Instant local preview while the upload is in flight.
+                        const localPreviewUrl = URL.createObjectURL(file);
+                        setMenuImagePreview(localPreviewUrl);
+                        setUploadingMenuImage(true);
+                        try {
+                          const { url } = await uploadFileToStorage(file, "media/menu-items");
+                          setMenuForm((prev) => ({ ...prev, image: url }));
+                        } catch (err) {
+                          console.error("Failed to upload menu item image:", err);
+                          alert("❌ Failed to upload image — please check your connection and try again.");
+                          setMenuImagePreview(null);
+                        } finally {
+                          URL.revokeObjectURL(localPreviewUrl);
+                          setUploadingMenuImage(false);
+                        }
                       }}
                     />
                     {(menuImagePreview || menuForm.image) && (
@@ -1552,7 +1591,7 @@ export default function AdminPage() {
                 {/* ── SAVE / CANCEL ── */}
                 <div className="flex items-center gap-3 mt-6 pt-5 border-t border-gray-100">
                   <button
-                    disabled={savingMenuItem}
+                    disabled={savingMenuItem || uploadingMenuImage}
                     onClick={async () => {
                       const isDrink = menuForm.category === "Drinks";
                       if (!menuForm.name.trim()) { alert("Item name is required"); return; }
@@ -1613,7 +1652,7 @@ export default function AdminPage() {
                     }}
                     className="bg-green-600 hover:bg-green-700 disabled:opacity-60 disabled:cursor-not-allowed text-white px-6 py-2.5 rounded-xl font-semibold text-sm transition shadow-sm"
                   >
-                    {savingMenuItem ? "Saving…" : editingMenuId ? "Save Changes" : "Add to Menu"}
+                    {uploadingMenuImage ? "Uploading image…" : savingMenuItem ? "Saving…" : editingMenuId ? "Save Changes" : "Add to Menu"}
                   </button>
                   {editingMenuId && (
                     <button

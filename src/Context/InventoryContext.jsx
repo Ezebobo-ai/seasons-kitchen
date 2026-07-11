@@ -1,48 +1,100 @@
 // src/Context/InventoryContext.jsx
 // Manages inventory stock levels and market/budget lists.
-// Completely isolated — does NOT touch CartContext, MenuContext, or any payment logic.
+//
+// ── FIX: previously this file stored everything in localStorage, which is
+// per-browser/per-device. That meant the admin's Stock/Market numbers were
+// different on every device and browser, and reset to DEFAULT_INVENTORY on
+// any new device, incognito window, or cleared site data.
+//
+// All data now lives in Firestore: settings/admin → { inventory, marketList }
+// — the same document already used by MenuContext and MediaContext, so admin
+// changes sync instantly across every open tab/device via onSnapshot.
+//
+// Every write function reads the CURRENT Firestore state immediately before
+// writing (instead of building from the React state closure), the same
+// pattern used in MenuContext.persist(). This avoids the stale-closure race
+// where a write built from an old in-memory snapshot could silently
+// overwrite (and revert) a more recent change.
 
-import React, { createContext, useContext, useState, useCallback } from "react";
+import React, { createContext, useContext, useState, useEffect, useCallback } from "react";
+import { doc, getDoc, setDoc, onSnapshot } from "firebase/firestore";
+import { db } from "../firebase.js";
 import { DEFAULT_INVENTORY, DRINK_INGREDIENT_MAP } from "../data/inventoryDefaults.js";
 
 const InventoryContext = createContext(null);
 
-const LS_INVENTORY_KEY = "sk_inventory";
-const LS_MARKET_KEY    = "sk_market_list";
+const ADMIN_REF = () => doc(db, "settings", "admin");
 
-// ─── HELPERS ────────────────────────────────────────────────────────────────
-function loadInventory() {
-  try {
-    const raw = localStorage.getItem(LS_INVENTORY_KEY);
-    if (raw) return JSON.parse(raw);
-  } catch {}
-  // First load — seed defaults and persist
-  localStorage.setItem(LS_INVENTORY_KEY, JSON.stringify(DEFAULT_INVENTORY));
-  return DEFAULT_INVENTORY;
-}
-
-function loadMarket() {
-  try {
-    const raw = localStorage.getItem(LS_MARKET_KEY);
-    if (raw) return JSON.parse(raw);
-  } catch {}
-  return [];
+// Strip undefined values before writing to Firestore.
+function clean(obj) {
+  if (Array.isArray(obj)) return obj.map(clean);
+  if (obj !== null && typeof obj === "object") {
+    return Object.fromEntries(
+      Object.entries(obj)
+        .filter(([, v]) => v !== undefined)
+        .map(([k, v]) => [k, clean(v)])
+    );
+  }
+  return obj;
 }
 
 // ─── PROVIDER ────────────────────────────────────────────────────────────────
 export function InventoryProvider({ children }) {
+  const [inventory, setInventory] = useState(DEFAULT_INVENTORY);
+  const [marketList, setMarketList] = useState([]);
+  const [loaded, setLoaded] = useState(false);
 
-  const [inventory, setInventory] = useState(loadInventory);
-  const [marketList, setMarketList] = useState(loadMarket);
+  // ── Single source of truth: onSnapshot ──────────────────────────────────
+  useEffect(() => {
+    const ref = ADMIN_REF();
+    const unsub = onSnapshot(
+      ref,
+      (snap) => {
+        if (snap.exists()) {
+          const data = snap.data();
+          if (Array.isArray(data.inventory)) {
+            setInventory(data.inventory);
+          } else {
+            // First run — seed inventory into the shared admin doc.
+            setDoc(ref, { inventory: clean(DEFAULT_INVENTORY) }, { merge: true }).catch(console.error);
+          }
+          setMarketList(Array.isArray(data.marketList) ? data.marketList : []);
+        } else {
+          setDoc(ref, { inventory: clean(DEFAULT_INVENTORY) }, { merge: true }).catch(console.error);
+        }
+        setLoaded(true);
+      },
+      (err) => {
+        console.error("[InventoryContext] onSnapshot error:", err);
+        setLoaded(true);
+      }
+    );
+    return () => unsub();
+  }, []);
 
-  // ── Persist helpers ──────────────────────────────────────────────────────
-  const persistInv = (items) => {
-    setInventory(items);
-    localStorage.setItem(LS_INVENTORY_KEY, JSON.stringify(items));
+  // ── Fresh-read-before-write helpers ─────────────────────────────────────
+  // Both take an updater(currentArray) => nextArray, matching MenuContext's
+  // persist() pattern, so concurrent edits never overwrite each other.
+  const persistInv = async (updater) => {
+    const ref = ADMIN_REF();
+    const snap = await getDoc(ref);
+    const current = snap.exists() && Array.isArray(snap.data().inventory)
+      ? snap.data().inventory
+      : DEFAULT_INVENTORY;
+    const next = clean(updater(current));
+    await setDoc(ref, { inventory: next }, { merge: true });
+    // onSnapshot updates state — no local setInventory() here.
   };
-  const persistMarket = (items) => {
-    setMarketList(items);
-    localStorage.setItem(LS_MARKET_KEY, JSON.stringify(items));
+
+  const persistMarket = async (updater) => {
+    const ref = ADMIN_REF();
+    const snap = await getDoc(ref);
+    const current = snap.exists() && Array.isArray(snap.data().marketList)
+      ? snap.data().marketList
+      : [];
+    const next = clean(updater(current));
+    await setDoc(ref, { marketList: next }, { merge: true });
+    // onSnapshot updates state — no local setMarketList() here.
   };
 
   // ── INVENTORY CRUD ───────────────────────────────────────────────────────
@@ -53,108 +105,143 @@ export function InventoryProvider({ children }) {
       qty: Number(item.qty || 0),
       minThreshold: Number(item.minThreshold || 0),
     };
-    persistInv([...inventory, newItem]);
+    persistInv((current) => [...current, newItem]).catch((err) =>
+      console.error("[InventoryContext] addInventoryItem failed:", err)
+    );
   };
 
   const updateInventoryItem = (id, updates) => {
-    persistInv(inventory.map(i =>
-      i.id === id ? { ...i, ...updates, qty: Number(updates.qty ?? i.qty), minThreshold: Number(updates.minThreshold ?? i.minThreshold) } : i
-    ));
+    persistInv((current) =>
+      current.map((i) =>
+        i.id === id
+          ? {
+              ...i,
+              ...updates,
+              qty: Number(updates.qty ?? i.qty),
+              minThreshold: Number(updates.minThreshold ?? i.minThreshold),
+            }
+          : i
+      )
+    ).catch((err) => console.error("[InventoryContext] updateInventoryItem failed:", err));
   };
 
   const deleteInventoryItem = (id) => {
-    persistInv(inventory.filter(i => i.id !== id));
+    persistInv((current) => current.filter((i) => i.id !== id)).catch((err) =>
+      console.error("[InventoryContext] deleteInventoryItem failed:", err)
+    );
   };
 
   // ── STOCK DEDUCTION ───────────────────────────────────────────────────────
   // Called when admin CONFIRMS an order — reduces ingredients for each item.
-  // Non-drink items reduce generic packaging by 1 pack per item.
   const deductOrderIngredients = useCallback((orderItems = []) => {
     const deductions = {}; // { inv_id: totalQty }
 
-    orderItems.forEach(item => {
+    orderItems.forEach((item) => {
       const map = DRINK_INGREDIENT_MAP[item.name];
       if (map) {
-        // Drink — use specific ingredient map
         map.forEach(({ id, qty }) => {
           deductions[id] = (deductions[id] || 0) + qty * (item.quantity || 1);
         });
       } else {
-        // Food — deduct 1 takeaway pack per item
         deductions["inv_020"] = (deductions["inv_020"] || 0) + (item.quantity || 1);
-        // And 1 nylon bag per order (handled once, so we just add a small fraction)
         deductions["inv_021"] = (deductions["inv_021"] || 0) + 0.1;
       }
     });
 
-    persistInv(inventory.map(i => {
-      if (deductions[i.id] !== undefined) {
-        return { ...i, qty: Math.max(0, i.qty - deductions[i.id]) };
-      }
-      return i;
-    }));
-  }, [inventory]);
+    persistInv((current) =>
+      current.map((i) =>
+        deductions[i.id] !== undefined
+          ? { ...i, qty: Math.max(0, i.qty - deductions[i.id]) }
+          : i
+      )
+    ).catch((err) => console.error("[InventoryContext] deductOrderIngredients failed:", err));
+  }, []);
 
   // ── MARKET PURCHASE → INCREASE STOCK ─────────────────────────────────────
-  // When admin marks a market purchase complete, find matching inventory items
-  // and increase their qty.
   const applyMarketPurchase = useCallback((marketItems) => {
     const additions = {};
-    marketItems.forEach(item => {
+    marketItems.forEach((item) => {
       if (item.linkedInventoryId) {
-        additions[item.linkedInventoryId] = (additions[item.linkedInventoryId] || 0) + Number(item.qty || 0);
+        additions[item.linkedInventoryId] =
+          (additions[item.linkedInventoryId] || 0) + Number(item.qty || 0);
       }
     });
     if (Object.keys(additions).length === 0) return;
-    persistInv(inventory.map(i => {
-      if (additions[i.id]) return { ...i, qty: i.qty + additions[i.id] };
-      return i;
-    }));
-  }, [inventory]);
+    persistInv((current) =>
+      current.map((i) => (additions[i.id] ? { ...i, qty: i.qty + additions[i.id] } : i))
+    ).catch((err) => console.error("[InventoryContext] applyMarketPurchase failed:", err));
+  }, []);
 
   // ── MARKET LIST CRUD ─────────────────────────────────────────────────────
   const addMarketItem = (item) => {
-    persistMarket([...marketList, {
+    const newItem = {
       ...item,
       id: "mkt_" + Date.now(),
       qty: Number(item.qty || 0),
       suggestedPrice: Number(item.suggestedPrice || 0),
       actualPrice: Number(item.actualPrice || 0),
-    }]);
+    };
+    persistMarket((current) => [...current, newItem]).catch((err) =>
+      console.error("[InventoryContext] addMarketItem failed:", err)
+    );
   };
 
   const updateMarketItem = (id, updates) => {
-    persistMarket(marketList.map(i =>
-      i.id === id ? { ...i, ...updates,
-        qty:            Number(updates.qty          ?? i.qty),
-        suggestedPrice: Number(updates.suggestedPrice ?? i.suggestedPrice),
-        actualPrice:    Number(updates.actualPrice    ?? i.actualPrice),
-      } : i
-    ));
+    persistMarket((current) =>
+      current.map((i) =>
+        i.id === id
+          ? {
+              ...i,
+              ...updates,
+              qty: Number(updates.qty ?? i.qty),
+              suggestedPrice: Number(updates.suggestedPrice ?? i.suggestedPrice),
+              actualPrice: Number(updates.actualPrice ?? i.actualPrice),
+            }
+          : i
+      )
+    ).catch((err) => console.error("[InventoryContext] updateMarketItem failed:", err));
   };
 
-  const deleteMarketItem = (id) => persistMarket(marketList.filter(i => i.id !== id));
+  const deleteMarketItem = (id) => {
+    persistMarket((current) => current.filter((i) => i.id !== id)).catch((err) =>
+      console.error("[InventoryContext] deleteMarketItem failed:", err)
+    );
+  };
 
-  const clearMarketList = () => persistMarket([]);
+  const clearMarketList = () => {
+    persistMarket(() => []).catch((err) =>
+      console.error("[InventoryContext] clearMarketList failed:", err)
+    );
+  };
 
   // ── DERIVED ──────────────────────────────────────────────────────────────
-  const lowStockItems = inventory.filter(i => i.qty <= i.minThreshold);
+  const lowStockItems = inventory.filter((i) => i.qty <= i.minThreshold);
 
   const marketTotals = {
     estimated: marketList.reduce((s, i) => s + i.suggestedPrice * i.qty, 0),
-    actual:    marketList.reduce((s, i) => s + i.actualPrice    * i.qty, 0),
-    diff:      marketList.reduce((s, i) => s + (i.actualPrice - i.suggestedPrice) * i.qty, 0),
+    actual: marketList.reduce((s, i) => s + i.actualPrice * i.qty, 0),
+    diff: marketList.reduce((s, i) => s + (i.actualPrice - i.suggestedPrice) * i.qty, 0),
   };
 
   return (
-    <InventoryContext.Provider value={{
-      inventory, addInventoryItem, updateInventoryItem, deleteInventoryItem,
-      deductOrderIngredients,
-      marketList, addMarketItem, updateMarketItem, deleteMarketItem, clearMarketList,
-      applyMarketPurchase,
-      lowStockItems,
-      marketTotals,
-    }}>
+    <InventoryContext.Provider
+      value={{
+        inventory,
+        addInventoryItem,
+        updateInventoryItem,
+        deleteInventoryItem,
+        deductOrderIngredients,
+        marketList,
+        addMarketItem,
+        updateMarketItem,
+        deleteMarketItem,
+        clearMarketList,
+        applyMarketPurchase,
+        lowStockItems,
+        marketTotals,
+        loaded,
+      }}
+    >
       {children}
     </InventoryContext.Provider>
   );

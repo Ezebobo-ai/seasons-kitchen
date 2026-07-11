@@ -1,11 +1,21 @@
 // src/Context/MediaContext.jsx
 // Manages hero video + slideshow images for the landing page.
-// All data is persisted in Firestore: settings/admin → { media: { video, images } }
-// onSnapshot keeps every open tab in sync automatically.
+//
+// ── FIX: previously video/images were base64-encoded and written directly
+// into the "settings/admin" Firestore document — the SAME document used for
+// the entire menu array. Firestore hard-caps a document at 1MB, but the
+// upload UI allowed videos up to 60MB. Any video (and often multiple
+// images) pushed the shared document over that limit, causing the write to
+// be rejected by the server after the local optimistic cache had already
+// shown it as "saved" — which looked exactly like data silently reverting.
+//
+// Files now go to Firebase Storage (a file bucket with no such size limit),
+// and only the small download URL string is written to Firestore.
 
 import React, { createContext, useContext, useState, useEffect } from "react";
 import { doc, setDoc, onSnapshot } from "firebase/firestore";
 import { db } from "../firebase.js";
+import { uploadFileToStorage, deleteFileFromStorage } from "../utils/storageUpload.js";
 
 const MediaContext = createContext(null);
 
@@ -57,16 +67,14 @@ async function saveMedia(video, images) {
 }
 
 export function MediaProvider({ children }) {
-  // heroVideo: null | { src: string, name: string }
+  // heroVideo: null | { src: string, name: string, path?: string }
   const [heroVideo, setHeroVideo] = useState(null);
-  // slideshowImages: array of { src: string, name: string }
+  // slideshowImages: array of { src: string, name: string, path?: string }
   const [slideshowImages, setSlideshowImages] = useState(DEFAULT_IMAGE_ENTRIES);
   // Track whether we have loaded from Firestore yet (avoids flash of defaults)
   const [loaded, setLoaded] = useState(false);
 
   // ── Single source of truth: onSnapshot ──────────────────────────────────
-  // Fires immediately with cached data, then again on every remote change.
-  // No localStorage reads or writes anywhere in this file.
   useEffect(() => {
     const unsub = onSnapshot(
       ADMIN_REF(),
@@ -74,57 +82,51 @@ export function MediaProvider({ children }) {
         if (snap.exists()) {
           const data = snap.data();
           if (data.media) {
-            // video: stored as object or null
             setHeroVideo(data.media.video ?? null);
-            // images: stored as array of { src, name }
             const imgs = Array.isArray(data.media.images) && data.media.images.length
               ? data.media.images
               : DEFAULT_IMAGE_ENTRIES;
             setSlideshowImages(imgs);
           } else {
-            // Document exists (for menu) but media key not written yet —
-            // seed defaults into Firestore so the landing page has images.
             saveMedia(null, DEFAULT_IMAGE_ENTRIES).catch(console.error);
           }
         } else {
-          // Brand-new project — seed everything.
           saveMedia(null, DEFAULT_IMAGE_ENTRIES).catch(console.error);
         }
         setLoaded(true);
       },
       (err) => {
         console.error("[MediaContext] onSnapshot error:", err);
-        setLoaded(true); // still mark loaded so UI isn't stuck
+        setLoaded(true);
       }
     );
     return () => unsub();
   }, []);
 
   // ── Video actions ────────────────────────────────────────────────────────
-  // Reads the file as a base64 data-URL and saves to Firestore.
-  const uploadVideo = (file) => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = async () => {
-        const entry = { src: reader.result, name: file.name };
-        try {
-          await saveMedia(entry, slideshowImages);
-          // onSnapshot will update state — no manual setHeroVideo needed.
-          resolve(entry);
-        } catch (err) {
-          console.error("[MediaContext] uploadVideo save failed:", err);
-          reject(err);
-        }
-      };
-      reader.onerror = () => reject(reader.error);
-      reader.readAsDataURL(file);
-    });
+  const uploadVideo = async (file) => {
+    const { url, path } = await uploadFileToStorage(file, "media/videos");
+    const entry = { src: url, name: file.name, path };
+    const previousPath = heroVideo?.path;
+    try {
+      await saveMedia(entry, slideshowImages);
+      // Clean up the old video file now that the new one is confirmed saved.
+      if (previousPath) deleteFileFromStorage(previousPath);
+      return entry;
+    } catch (err) {
+      console.error("[MediaContext] uploadVideo save failed:", err);
+      // Firestore write failed — remove the orphaned upload so Storage
+      // doesn't accumulate files that are never referenced.
+      deleteFileFromStorage(path);
+      throw err;
+    }
   };
 
   const deleteVideo = async () => {
+    const previousPath = heroVideo?.path;
     try {
       await saveMedia(null, slideshowImages);
-      // onSnapshot updates state.
+      if (previousPath) deleteFileFromStorage(previousPath);
     } catch (err) {
       console.error("[MediaContext] deleteVideo failed:", err);
       throw err;
@@ -132,66 +134,58 @@ export function MediaProvider({ children }) {
   };
 
   // ── Image actions ────────────────────────────────────────────────────────
-  const uploadImages = (files) => {
-    return new Promise((resolve, reject) => {
-      const newEntries = [];
-      let processed = 0;
-      const fileArray = Array.from(files);
-
-      fileArray.forEach((file) => {
-        const reader = new FileReader();
-        reader.onload = async () => {
-          newEntries.push({ src: reader.result, name: file.name });
-          processed++;
-          if (processed === fileArray.length) {
-            const next = [...slideshowImages, ...newEntries].slice(0, 20);
-            try {
-              await saveMedia(heroVideo, next);
-              resolve(newEntries);
-            } catch (err) {
-              console.error("[MediaContext] uploadImages save failed:", err);
-              reject(err);
-            }
-          }
-        };
-        reader.onerror = () => reject(reader.error);
-        reader.readAsDataURL(file);
-      });
-    });
+  const uploadImages = async (files) => {
+    const fileArray = Array.from(files);
+    const uploaded = [];
+    try {
+      for (const file of fileArray) {
+        const { url, path } = await uploadFileToStorage(file, "media/images");
+        uploaded.push({ src: url, name: file.name, path });
+      }
+      const next = [...slideshowImages, ...uploaded].slice(0, 20);
+      await saveMedia(heroVideo, next);
+      return uploaded;
+    } catch (err) {
+      console.error("[MediaContext] uploadImages save failed:", err);
+      // Clean up any files that made it to Storage before the failure.
+      uploaded.forEach((u) => deleteFileFromStorage(u.path));
+      throw err;
+    }
   };
 
   const deleteImage = async (index) => {
+    const removed = slideshowImages[index];
     const next = slideshowImages.filter((_, i) => i !== index);
     try {
       await saveMedia(heroVideo, next);
+      if (removed?.path) deleteFileFromStorage(removed.path);
     } catch (err) {
       console.error("[MediaContext] deleteImage failed:", err);
       throw err;
     }
   };
 
-  const replaceImage = (index, file) => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = async () => {
-        const entry = { src: reader.result, name: file.name };
-        const next = slideshowImages.map((img, i) => (i === index ? entry : img));
-        try {
-          await saveMedia(heroVideo, next);
-          resolve(entry);
-        } catch (err) {
-          console.error("[MediaContext] replaceImage save failed:", err);
-          reject(err);
-        }
-      };
-      reader.onerror = () => reject(reader.error);
-      reader.readAsDataURL(file);
-    });
+  const replaceImage = async (index, file) => {
+    const { url, path } = await uploadFileToStorage(file, "media/images");
+    const entry = { src: url, name: file.name, path };
+    const previous = slideshowImages[index];
+    const next = slideshowImages.map((img, i) => (i === index ? entry : img));
+    try {
+      await saveMedia(heroVideo, next);
+      if (previous?.path) deleteFileFromStorage(previous.path);
+      return entry;
+    } catch (err) {
+      console.error("[MediaContext] replaceImage save failed:", err);
+      deleteFileFromStorage(path);
+      throw err;
+    }
   };
 
   const resetImages = async () => {
+    const previousPaths = slideshowImages.map((img) => img.path).filter(Boolean);
     try {
       await saveMedia(heroVideo, DEFAULT_IMAGE_ENTRIES);
+      previousPaths.forEach(deleteFileFromStorage);
     } catch (err) {
       console.error("[MediaContext] resetImages failed:", err);
       throw err;

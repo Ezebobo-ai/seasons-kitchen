@@ -30,7 +30,13 @@ button, a {
   color: white;
   padding: 2px;
   text-align: center;
-  z-index: 9999; 
+  z-index: 9999;
+  /* FIX: this banner is purely decorative (scrolling text, no click
+     behavior) but its high z-index was sitting on top of real buttons
+     near the bottom of the screen and silently swallowing taps meant for
+     them. pointer-events: none lets touches pass straight through to
+     whatever is underneath, while the banner still displays normally. */
+  pointer-events: none;
 }
 
 .ad-content {
@@ -51,4 +57,14 @@ button, a {
 @keyframes supportPulse {
   0%, 100% { box-shadow: 0 0 0 0 rgba(22, 163, 74, 0); }
   50%       { box-shadow: 0 0 0 8px rgba(22, 163, 74, 0.18); }
+}
+
+/* MOBILE: hide scrollbar on horizontally-scrollable strips (e.g. admin nav tabs)
+   while keeping touch/wheel scroll fully functional. */
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
 }
