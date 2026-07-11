@@ -62,11 +62,11 @@ const SEED_MENU = [
   { id: 37, category: "Customer's Delight", name: "Yam and Egg Sauce", price: 1000, image: "/yam.jpeg", description: "A beloved combination — soft boiled yam served alongside a rich, spiced egg sauce.", quantityAvailable: 20 },
 
   // Drinks
-  { id: 22, category: "Drinks", name: "Tigernut Drink", price: 1500, image: "/Tigernut.jpeg", description: "Naturally sweet, creamy tigernut milk — a probiotic-rich traditional Nigerian refreshment.", quantityAvailable: 20,
-    sizes: [{ label: "250ml", volume: 250, price: 1500, stock: 12 }, { label: "500ml", volume: 500, price: 2500, stock: 8 }] },
-  { id: 23, category: "Drinks", name: "Zobo Drink", price: 1500, image: "/Zobo.jpeg", description: "Deep ruby hibiscus drink infused with ginger, cloves, and citrus. Refreshing and antioxidant-rich.", quantityAvailable: 20,
-    sizes: [{ label: "250ml", volume: 250, price: 1500, stock: 12 }, { label: "500ml", volume: 500, price: 2500, stock: 8 }] },
-  { id: 24, category: "Drinks", name: "Pineapple Delight", price: 1500, image: "/Pineapple.jpeg", description: "Fresh pineapple blended into a smooth, tropical drink with a naturally sweet-tart balance.", quantityAvailable: 15,
+  { id: 22, category: "Drinks", name: "Tigernut Drink", price: 2000, image: "/Tigernut.jpeg", description: "Naturally sweet, creamy tigernut milk — a probiotic-rich traditional Nigerian refreshment.", quantityAvailable: 20,
+    sizes: [{ label: "250ml", volume: 250, price: 4000, stock: 12 }, { label: "500ml", volume: 500, price: 2500, stock: 8 }] },
+  { id: 23, category: "Drinks", name: "Zobo Drink", price: 2500, image: "/Zobo.jpeg", description: "Deep ruby hibiscus drink infused with ginger, cloves, and citrus. Refreshing and antioxidant-rich.", quantityAvailable: 20,
+    sizes: [{ label: "250ml", volume: 250, price: 2900, stock: 12 }, { label: "500ml", volume: 500, price: 2500, stock: 8 }] },
+  { id: 24, category: "Drinks", name: "Pineapple Delight", price: 2100, image: "/Pineapple.jpeg", description: "Fresh pineapple blended into a smooth, tropical drink with a naturally sweet-tart balance.", quantityAvailable: 15,
     sizes: [{ label: "250ml", volume: 250, price: 1500, stock: 9 }, { label: "500ml", volume: 500, price: 2500, stock: 6 }] },
   { id: 25, category: "Drinks", name: "Orange Juice", price: 2250, image: "/Orange.jpeg", description: "Freshly squeezed orange juice, vibrant and packed with Vitamin C. Pure and unadulterated.", quantityAvailable: 15,
     sizes: [{ label: "250ml", volume: 250, price: 2250, stock: 9 }, { label: "500ml", volume: 500, price: 4000, stock: 6 }] },
@@ -112,9 +112,7 @@ function cleanForFirestore(obj) {
   return obj;
 }
 
-// ─── MIGRATE: ensure every stored item has required fields ───────────────
-// Runs on data coming FROM Firestore so the app always sees a complete shape.
-// Also restores sizes to known drinks that were saved before sizes were added.
+
 function migrateMenu(parsed) {
   const sizesById = {};
   SEED_MENU.forEach((s) => { if (s.sizes) sizesById[s.id] = s.sizes; });
@@ -154,25 +152,15 @@ export function MenuProvider({ children }) {
   const [firestoreError, setFirestoreError] = useState(null);
   const [dataLoaded, setDataLoaded] = useState(false);
 
-  // Live categories from Firestore — falls back to the hardcoded CATEGORIES
-  // constant if the document hasn't been customized yet (first deploy, no
-  // admin changes). This means the customer order page and admin form always
-  // show the same list, and any changes the admin makes are immediately
-  // visible everywhere with no extra code or page refresh.
+  // categories is the live Firestore-backed list; CATEGORIES (the constant)
+  // is kept as the hardcoded fallback for first-run seeding.
   const [categories, setCategories] = useState(CATEGORIES);
 
-  // ── FIX 1: Single source of truth via onSnapshot ─────────────────────────
-  // onSnapshot is the ONLY place that calls setMenuItems for remote data.
-  // All write helpers (persist, addMenuItem, etc.) ONLY write to Firestore;
-  // onSnapshot picks up the change and updates React state automatically.
-  // This eliminates double-setMenuItems races and stale-closure overwrites.
-  // categories is read from the same document — one listener, two fields.
+ 
   useEffect(() => {
     const ref = ADMIN_REF();
     const unsub = onSnapshot(ref, (snap) => {
-      // A successful callback means Firestore IS reachable — clear any
-      // previous connection warning, even if this particular snapshot
-      // turns out to be the "doc doesn't exist yet" branch below.
+    
       setFirestoreError(null);
       setDataLoaded(true);
 
@@ -521,22 +509,128 @@ export function MenuProvider({ children }) {
       : (item.quantityAvailable ?? 0) > 0;
 
   // ── CATEGORY MANAGEMENT ────────────────────────────────────────────────────
- 
-  const saveCategories = async (newCategories) => {
-    const cleaned = newCategories
-      .map((c) => String(c).trim())
-      .filter(Boolean);
-    const deduped = [...new Set(cleaned)];
+  // Both functions below read Firestore's current category list immediately
+  // before writing — the same safe pattern as persist() and renameCategory()
+  // above — so two admins (or two tabs) adding/removing categories around
+  // the same moment can never silently overwrite each other's change.
 
-    // Optimistic update
-    setCategories(deduped);
+  const addCategory = async (name) => {
+    const trimmed = String(name || "").trim();
+    if (!trimmed) return;
+
+    const ref = ADMIN_REF();
+    let snap;
+    try {
+      snap = await getDoc(ref);
+    } catch (err) {
+      console.error("[MenuContext] addCategory: failed to read Firestore:", err);
+      throw err;
+    }
+    const data = snap.exists() ? snap.data() : {};
+    const current = Array.isArray(data.categories) && data.categories.length > 0
+      ? data.categories
+      : CATEGORIES;
+
+    if (current.some((c) => c.toLowerCase() === trimmed.toLowerCase())) {
+      throw new Error(`"${trimmed}" already exists.`);
+    }
+
+    const next = [...current, trimmed];
+    try {
+      await setDoc(ref, { categories: next }, { merge: true });
+      // onSnapshot updates state — no local setCategories() needed.
+    } catch (err) {
+      console.error("[MenuContext] addCategory failed:", err);
+      throw err;
+    }
+  };
+
+  const deleteCategory = async (name) => {
+    const ref = ADMIN_REF();
+    let snap;
+    try {
+      snap = await getDoc(ref);
+    } catch (err) {
+      console.error("[MenuContext] deleteCategory: failed to read Firestore:", err);
+      throw err;
+    }
+    const data = snap.exists() ? snap.data() : {};
+    const current = Array.isArray(data.categories) && data.categories.length > 0
+      ? data.categories
+      : CATEGORIES;
+
+    const next = current.filter((c) => c !== name);
+    if (next.length === 0) {
+      throw new Error("You must keep at least one category.");
+    }
 
     try {
-      await setDoc(ADMIN_REF(), { categories: deduped }, { merge: true });
+      await setDoc(ref, { categories: next }, { merge: true });
+      // onSnapshot updates state — no local setCategories() needed.
+      // Note: items that used this category keep their old category label
+      // (matching the confirmation dialog's warning) — they aren't deleted,
+      // just no longer shown under any category filter until reassigned.
     } catch (err) {
-      console.error("[MenuContext] saveCategories failed:", err);
-      // Revert to whatever Firestore last confirmed
-      setCategories(categories);
+      console.error("[MenuContext] deleteCategory failed:", err);
+      throw err;
+    }
+  };
+
+  // FIX: this function was being called from AdminPage.jsx (category rename
+  // UI) but was never actually defined anywhere in the codebase — every
+  // rename attempt threw "renameCategory is not a function," silently
+  // failed (no catch block was present to surface it), and left every item
+  // that belonged to the renamed category still tagged with the OLD
+  // category name in Firestore. Those items didn't disappear from the
+  // database, but they became invisible in the UI because nothing was
+  // filtering for their now-orphaned old category name anymore.
+  //
+  // This does a fresh Firestore read, renames the category AND updates the
+  // `category` field on every affected menu item, then writes both back in
+  // ONE setDoc call — so the rename and the item migration can never end up
+  // out of sync with each other, no matter what else is happening at the
+  // same time.
+  const renameCategory = async (oldName, newName) => {
+    const trimmedNew = String(newName || "").trim();
+    if (!trimmedNew || trimmedNew === oldName) return;
+
+    const ref = ADMIN_REF();
+    let snap;
+    try {
+      snap = await getDoc(ref);
+    } catch (err) {
+      console.error("[MenuContext] renameCategory: failed to read Firestore:", err);
+      throw err;
+    }
+
+    const data = snap.exists() ? snap.data() : {};
+    const currentCategories = Array.isArray(data.categories) && data.categories.length > 0
+      ? data.categories
+      : CATEGORIES;
+    const currentMenu = Array.isArray(data.menu) ? migrateMenu(data.menu) : migrateMenu(SEED_MENU);
+
+    if (currentCategories.some((c) => c !== oldName && c.toLowerCase() === trimmedNew.toLowerCase())) {
+      throw new Error(`A category named "${trimmedNew}" already exists.`);
+    }
+
+    const nextCategories = [...new Set(
+      currentCategories.map((c) => (c === oldName ? trimmedNew : c))
+    )];
+
+    const nextMenu = currentMenu.map((item) =>
+      item.category === oldName ? { ...item, category: trimmedNew } : item
+    );
+
+    try {
+      await setDoc(
+        ref,
+        { categories: nextCategories, menu: cleanForFirestore(nextMenu) },
+        { merge: true }
+      );
+      // onSnapshot updates both categories and menuItems state — no local
+      // setState calls needed here.
+    } catch (err) {
+      console.error("[MenuContext] renameCategory failed:", err);
       throw err;
     }
   };
@@ -559,7 +653,9 @@ export function MenuProvider({ children }) {
         // so it can still be imported directly by code that doesn't need
         // reactivity (e.g. unit tests, seed checks).
         categories,
-        saveCategories,
+        addCategory,
+        deleteCategory,
+        renameCategory,
         CATEGORIES,
         // Connection status — lets the UI show a real warning instead of
         // silently displaying default seed data when Firestore is unreachable.

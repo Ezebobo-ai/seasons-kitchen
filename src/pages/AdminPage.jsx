@@ -100,7 +100,7 @@ export default function AdminPage() {
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [historyFilter, setHistoryFilter] = useState("all");
   const { stock, updateStock, orders, setOrders } = useContext(CartContext);
-  const { menuItems, addMenuItem, updateMenuItem, deleteMenuItem, increaseMenuStock, decreaseMenuStock, increaseSizeStock, decreaseSizeStock, categories, saveCategories, renameCategory, firestoreError } = useContext(MenuContext);
+  const { menuItems, addMenuItem, updateMenuItem, deleteMenuItem, increaseMenuStock, decreaseMenuStock, increaseSizeStock, decreaseSizeStock, categories, addCategory, deleteCategory, renameCategory, firestoreError } = useContext(MenuContext);
   const { feedbackList, deleteFeedback } = useContext(FeedbackContext);
   const { lowStockItems, deductOrderIngredients } = useInventory();
   // ── Seed from localStorage immediately so Admin sees choices even before backend responds ──
@@ -1250,6 +1250,9 @@ export default function AdminPage() {
                                   await renameCategory(cat, newName);
                                   setEditingCategory(null);
                                   setEditingCategoryValue("");
+                                } catch (err) {
+                                  console.error("Category rename failed:", err);
+                                  alert(`❌ Couldn't rename category: ${err.message || "please try again."}`);
                                 } finally {
                                   setCategorySaving(false);
                                 }
@@ -1278,6 +1281,9 @@ export default function AdminPage() {
                                 await renameCategory(cat, newName);
                                 setEditingCategory(null);
                                 setEditingCategoryValue("");
+                              } catch (err) {
+                                console.error("Category rename failed:", err);
+                                alert(`❌ Couldn't rename category: ${err.message || "please try again."}`);
                               } finally {
                                 setCategorySaving(false);
                               }
@@ -1312,10 +1318,17 @@ export default function AdminPage() {
                               if (hasItems) {
                                 if (!window.confirm(`"${cat}" has menu items. Remove the category anyway? Items will keep their category label but won't appear in the filter.`)) return;
                               }
-                              const next = categories.filter((c) => c !== cat);
-                              if (next.length === 0) { alert("You must keep at least one category."); return; }
+                              const willBeEmpty = categories.filter((c) => c !== cat).length === 0;
+                              if (willBeEmpty) { alert("You must keep at least one category."); return; }
                               setCategorySaving(true);
-                              try { await saveCategories(next); } finally { setCategorySaving(false); }
+                              try {
+                                await deleteCategory(cat);
+                              } catch (err) {
+                                console.error("Delete category failed:", err);
+                                alert(`❌ Couldn't remove category: ${err.message || "please try again."}`);
+                              } finally {
+                                setCategorySaving(false);
+                              }
                             }}
                             className="ml-0.5 text-indigo-400 hover:text-red-500 transition font-bold leading-none"
                             title={`Remove "${cat}"`}
@@ -1343,8 +1356,15 @@ export default function AdminPage() {
                         alert("That category already exists."); return;
                       }
                       setCategorySaving(true);
-                      try { await saveCategories([...categories, val]); setNewCategoryInput(""); }
-                      finally { setCategorySaving(false); }
+                      try {
+                        await addCategory(val);
+                        setNewCategoryInput("");
+                      } catch (err) {
+                        console.error("Add category failed:", err);
+                        alert(`❌ Couldn't add category: ${err.message || "please try again."}`);
+                      } finally {
+                        setCategorySaving(false);
+                      }
                     }}
                     className="flex-1 border border-gray-200 rounded-xl px-4 py-2.5 text-sm text-gray-800 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-transparent transition"
                   />
@@ -1357,8 +1377,15 @@ export default function AdminPage() {
                         alert("That category already exists."); return;
                       }
                       setCategorySaving(true);
-                      try { await saveCategories([...categories, val]); setNewCategoryInput(""); }
-                      finally { setCategorySaving(false); }
+                      try {
+                        await addCategory(val);
+                        setNewCategoryInput("");
+                      } catch (err) {
+                        console.error("Add category failed:", err);
+                        alert(`❌ Couldn't add category: ${err.message || "please try again."}`);
+                      } finally {
+                        setCategorySaving(false);
+                      }
                     }}
                     className={`px-5 py-2.5 text-sm font-semibold rounded-xl transition ${
                       categorySaving || !newCategoryInput.trim()
