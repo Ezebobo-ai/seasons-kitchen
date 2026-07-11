@@ -100,7 +100,7 @@ export default function AdminPage() {
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [historyFilter, setHistoryFilter] = useState("all");
   const { stock, updateStock, orders, setOrders } = useContext(CartContext);
-  const { menuItems, addMenuItem, updateMenuItem, deleteMenuItem, increaseMenuStock, decreaseMenuStock, increaseSizeStock, decreaseSizeStock, categories, saveCategories, renameCategory } = useContext(MenuContext);
+  const { menuItems, addMenuItem, updateMenuItem, deleteMenuItem, increaseMenuStock, decreaseMenuStock, increaseSizeStock, decreaseSizeStock, categories, saveCategories, renameCategory, firestoreError } = useContext(MenuContext);
   const { feedbackList, deleteFeedback } = useContext(FeedbackContext);
   const { lowStockItems, deductOrderIngredients } = useInventory();
   // ── Seed from localStorage immediately so Admin sees choices even before backend responds ──
@@ -486,6 +486,23 @@ export default function AdminPage() {
           </div>
         </div>
       </div>
+
+      {/* ── FIRESTORE CONNECTION WARNING ─────────────────────────────────
+          FIX: previously a Firestore read failure was invisible — the admin
+          panel would silently keep showing default/seed data with no
+          indication anything was wrong, which looked exactly like "my data
+          disappeared." This banner makes a real connection problem obvious
+          and distinguishes it from an actual data-loss scenario. */}
+      {firestoreError && (
+        <div className="bg-red-50 border-b border-red-200 px-4 py-2.5 text-sm text-red-700 flex items-center gap-2">
+          <span>⚠️</span>
+          <span>
+            <strong>Can't reach the database.</strong> What you're seeing below may be outdated or default data —
+            your real menu/data is likely safe, but changes won't save until this is fixed. Check your internet
+            connection and Firestore security rules.
+          </span>
+        </div>
+      )}
 
       {/* ── CONTENT ────────────────────────────────────────────────────── */}
       <div className="max-w-7xl mx-auto px-4 py-6">

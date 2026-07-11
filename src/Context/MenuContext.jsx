@@ -151,6 +151,8 @@ export const MenuContext = createContext();
 
 export function MenuProvider({ children }) {
   const [menuItems, setMenuItems] = useState(SEED_MENU);
+  const [firestoreError, setFirestoreError] = useState(null);
+  const [dataLoaded, setDataLoaded] = useState(false);
 
   // Live categories from Firestore — falls back to the hardcoded CATEGORIES
   // constant if the document hasn't been customized yet (first deploy, no
@@ -168,6 +170,12 @@ export function MenuProvider({ children }) {
   useEffect(() => {
     const ref = ADMIN_REF();
     const unsub = onSnapshot(ref, (snap) => {
+      // A successful callback means Firestore IS reachable — clear any
+      // previous connection warning, even if this particular snapshot
+      // turns out to be the "doc doesn't exist yet" branch below.
+      setFirestoreError(null);
+      setDataLoaded(true);
+
       if (snap.exists()) {
         const data = snap.data();
         // ── menu ──────────────────────────────────────────────────────────
@@ -190,7 +198,16 @@ export function MenuProvider({ children }) {
         setDoc(ref, { menu: safe }, { merge: true }).catch(console.error);
       }
     }, (err) => {
+      // FIX: previously this only logged to the console. If Firestore was
+      // unreachable (bad rules, network issue, permissions), the site would
+      // silently keep showing SEED_MENU (the hardcoded default items) with
+      // NO visible indication anything was wrong — which looks identical to
+      // "my real data disappeared," even though nothing in Firestore was
+      // actually touched. Now the failure is tracked in state so the UI can
+      // show a clear, honest warning instead of a silent, confusing fallback.
       console.error("[MenuContext] onSnapshot error:", err);
+      setFirestoreError(err?.message || "Could not connect to the database.");
+      setDataLoaded(true);
     });
     return () => unsub();
   }, []);
@@ -544,6 +561,10 @@ export function MenuProvider({ children }) {
         categories,
         saveCategories,
         CATEGORIES,
+        // Connection status — lets the UI show a real warning instead of
+        // silently displaying default seed data when Firestore is unreachable.
+        firestoreError,
+        dataLoaded,
       }}
     >
       {children}
