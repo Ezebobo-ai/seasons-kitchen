@@ -16,6 +16,7 @@ import React, { createContext, useContext, useState, useEffect } from "react";
 import { doc, setDoc, onSnapshot } from "firebase/firestore";
 import { db } from "../firebase.js";
 import { uploadFileToStorage, deleteFileFromStorage } from "../utils/storageUpload.js";
+import { seedIfAdmin } from "../utils/seedGuard.js";
 
 const MediaContext = createContext(null);
 
@@ -88,10 +89,18 @@ export function MediaProvider({ children }) {
               : DEFAULT_IMAGE_ENTRIES;
             setSlideshowImages(imgs);
           } else {
-            saveMedia(null, DEFAULT_IMAGE_ENTRIES).catch(console.error);
+            // Field missing on an existing doc — seed it, but ONLY from an
+            // authenticated admin session. This intentionally bypasses
+            // saveMedia() (used by real admin edits) and calls the guard
+            // directly, so media edit logic itself is untouched.
+            // See utils/seedGuard.js.
+            const payload = clean({ media: { video: null, images: DEFAULT_IMAGE_ENTRIES } });
+            seedIfAdmin(ADMIN_REF(), payload, "media").catch(console.error);
           }
         } else {
-          saveMedia(null, DEFAULT_IMAGE_ENTRIES).catch(console.error);
+          // Brand-new project — same admin-only seed guard as above.
+          const payload = clean({ media: { video: null, images: DEFAULT_IMAGE_ENTRIES } });
+          seedIfAdmin(ADMIN_REF(), payload, "media").catch(console.error);
         }
         setLoaded(true);
       },

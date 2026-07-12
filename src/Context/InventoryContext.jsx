@@ -20,6 +20,7 @@ import React, { createContext, useContext, useState, useEffect, useCallback } fr
 import { doc, getDoc, setDoc, onSnapshot } from "firebase/firestore";
 import { db } from "../firebase.js";
 import { DEFAULT_INVENTORY, DRINK_INGREDIENT_MAP } from "../data/inventoryDefaults.js";
+import { seedIfAdmin } from "../utils/seedGuard.js";
 
 const InventoryContext = createContext(null);
 
@@ -55,12 +56,13 @@ export function InventoryProvider({ children }) {
           if (Array.isArray(data.inventory)) {
             setInventory(data.inventory);
           } else {
-            // First run — seed inventory into the shared admin doc.
-            setDoc(ref, { inventory: clean(DEFAULT_INVENTORY) }, { merge: true }).catch(console.error);
+            // First run — seed inventory into the shared admin doc, but ONLY
+            // from an authenticated admin session. See utils/seedGuard.js.
+            seedIfAdmin(ref, { inventory: clean(DEFAULT_INVENTORY) }, "inventory").catch(console.error);
           }
           setMarketList(Array.isArray(data.marketList) ? data.marketList : []);
         } else {
-          setDoc(ref, { inventory: clean(DEFAULT_INVENTORY) }, { merge: true }).catch(console.error);
+          seedIfAdmin(ref, { inventory: clean(DEFAULT_INVENTORY) }, "inventory").catch(console.error);
         }
         setLoaded(true);
       },

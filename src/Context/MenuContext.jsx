@@ -1,6 +1,7 @@
 import React, { createContext, useState, useEffect } from "react";
 import { doc, getDoc, setDoc, onSnapshot } from "firebase/firestore";
 import { db } from "../firebase.js";
+import { seedIfAdmin } from "../utils/seedGuard.js";
 
 // ─── HARDCODED SEED DATA ───────────────────────────────────────────────────
 const SEED_MENU = [
@@ -170,9 +171,12 @@ export function MenuProvider({ children }) {
         if (Array.isArray(data.menu)) {
           setMenuItems(migrateMenu(data.menu));
         } else {
-          // First run — seed menu. onSnapshot will fire again with the data.
+          // First run — seed menu, but ONLY from an authenticated admin
+          // session. A customer-facing browser will keep showing the local
+          // SEED_MENU fallback (via useState's initial value, below) without
+          // ever writing it to Firestore. See utils/seedGuard.js.
           const safe = cleanForFirestore(SEED_MENU);
-          setDoc(ref, { menu: safe }, { merge: true }).catch(console.error);
+          seedIfAdmin(ref, { menu: safe }, "menu").catch(console.error);
         }
         // ── categories ────────────────────────────────────────────────────
         // If the document has a categories array, use it; otherwise keep the
@@ -181,9 +185,10 @@ export function MenuProvider({ children }) {
           setCategories(data.categories);
         }
       } else {
-        // Brand-new project — seed both menu and categories.
+        // Brand-new project — seed menu, but ONLY from an authenticated
+        // admin session (see note above).
         const safe = cleanForFirestore(SEED_MENU);
-        setDoc(ref, { menu: safe }, { merge: true }).catch(console.error);
+        seedIfAdmin(ref, { menu: safe }, "menu").catch(console.error);
       }
     }, (err) => {
       // FIX: previously this only logged to the console. If Firestore was
