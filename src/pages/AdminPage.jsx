@@ -92,6 +92,7 @@ export default function AdminPage() {
   const [isAuthenticated, setIsAuthenticated] = useState(() => isAdminLoggedIn());
   const [adminPassword, setAdminPasswordInput] = useState("");
   const [loginError, setLoginError] = useState("");
+  const [loginChecking, setLoginChecking] = useState(false);
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [openOrder, setOpenOrder] = useState(null);
@@ -183,9 +184,20 @@ export default function AdminPage() {
   };
 
   // ─── AUTH ─────────────────────────────────────────────────────────────────
-  const handleLogin = () => {
+  const handleLogin = async () => {
     setLoginError("");
-    if (verifyAdminPassword(adminPassword)) {
+    setLoginChecking(true);
+    let ok = false;
+    try {
+      ok = await verifyAdminPassword(adminPassword);
+    } catch (err) {
+      console.error("[AdminPage] Login check failed:", err);
+      setLoginChecking(false);
+      setLoginError("❌ Could not reach the server — check your connection and try again.");
+      return;
+    }
+    setLoginChecking(false);
+    if (ok) {
       setIsAuthenticated(true);
       setAdminLoggedIn(true);
       setAdminPasswordInput("");
@@ -338,17 +350,19 @@ export default function AdminPage() {
             placeholder="Enter admin password"
             value={adminPassword}
             onChange={(e) => setAdminPasswordInput(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && handleLogin()}
-            className="border border-gray-200 p-3 w-full rounded-xl mb-4 text-sm focus:outline-none focus:ring-2 focus:ring-green-400 transition"
+            onKeyDown={(e) => e.key === "Enter" && !loginChecking && handleLogin()}
+            disabled={loginChecking}
+            className="border border-gray-200 p-3 w-full rounded-xl mb-4 text-sm focus:outline-none focus:ring-2 focus:ring-green-400 transition disabled:opacity-60"
           />
           {loginError && (
             <p className="text-xs text-red-600 font-medium mb-3 text-center">{loginError}</p>
           )}
           <button
             onClick={handleLogin}
-            className="bg-green-600 hover:bg-green-700 text-white w-full py-3 rounded-xl font-semibold text-sm transition shadow-sm"
+            disabled={loginChecking}
+            className="bg-green-600 hover:bg-green-700 disabled:opacity-60 disabled:cursor-not-allowed text-white w-full py-3 rounded-xl font-semibold text-sm transition shadow-sm"
           >
-            Login →
+            {loginChecking ? "Checking…" : "Login →"}
           </button>
         </div>
       </div>

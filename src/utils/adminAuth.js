@@ -1,28 +1,106 @@
 // src/utils/adminAuth.js
 //
-// Lightweight, fully client-side admin auth helpers.
-// Handles login session and password management only.
-// (Forgot-password / OTP reset flow has been removed.)
+// Lightweight admin auth helpers.
+//
+// ── FIX: the admin PASSWORD used to live only in this browser's
+// localStorage. Changing it on one device never reached any other device
+// — a new device, a cleared browser, or an incognito window would silently
+// fall back to the hardcoded factory default, which looked like "the admin
+// panel reset itself." The password itself is now stored in Firestore
+// (settings/admin -> adminPassword), the same document already used for
+// the WhatsApp number, so a change made on one device is immediately the
+// correct password everywhere.
+//
+// The LOGIN SESSION (isAdminLoggedIn/setAdminLoggedIn/logoutAdmin) is
+// intentionally kept per-device in sessionStorage — being logged in on
+// your laptop should not automatically log in your phone, that's normal,
+// expected behavior for a login session and is unrelated to the password
+// itself being correct.
+//
+// Writes only ever happen after a password has already been verified
+// (either the current password, during a deliberate "change password"
+// action, or — for the one-time migration below — the legacy password
+// itself), so this file never writes to Firestore automatically or
+// unauthenticated, consistent with the CRITICAL-2 fix in MenuContext /
+// InventoryContext / MediaContext.
+
+import { getAdminSettings, updateAdminPassword } from "./settingsService.js";
 
 // ─── Storage keys ────────────────────────────────────────────────────────────
-const ADMIN_PASSWORD_KEY = "sk_admin_password";
+const ADMIN_PASSWORD_KEY = "sk_admin_password"; // legacy, per-device — read-only now, used only for migration
 const ADMIN_SESSION_KEY  = "sk_admin_session";
 
-// Default password for first-time use
+// Default password for first-time use / brand-new deploy.
 const DEFAULT_ADMIN_PASSWORD = "admin123";
 
-// ─── Password storage ────────────────────────────────────────────────────────
+// ─── Password storage (Firestore-backed) ─────────────────────────────────────
 
-export function getAdminPassword() {
+/**
+ * Returns the current admin password.
+ * Firestore is the source of truth once a password has been set there.
+ * Before that (brand-new project, or Firestore unreachable), falls back to
+ * this device's legacy localStorage value if present, then the hardcoded
+ * default — the same fallback chain verifyAdminPassword() uses below.
+ */
+export async function getAdminPassword() {
+  const settings = await getAdminSettings();
+  if (settings?.adminPassword) return settings.adminPassword;
   return localStorage.getItem(ADMIN_PASSWORD_KEY) || DEFAULT_ADMIN_PASSWORD;
 }
 
-export function setAdminPassword(newPassword) {
-  localStorage.setItem(ADMIN_PASSWORD_KEY, newPassword);
+/**
+ * Sets a new admin password in Firestore so it takes effect on every
+ * device immediately. Only ever call this after the CURRENT password has
+ * already been verified (see AdminSettingsPage.jsx) — this function does
+ * not itself re-check anything, by design, to match how setDoc-based
+ * writes work elsewhere in this app (persist(), persistInv(), etc.).
+ */
+export async function setAdminPassword(newPassword) {
+  const result = await updateAdminPassword(newPassword);
+  if (!result.success) {
+    throw new Error("Could not save the new password — please check your connection and try again.");
+  }
+  // The Firestore value is now authoritative; drop the stale per-device copy.
+  localStorage.removeItem(ADMIN_PASSWORD_KEY);
 }
 
-export function verifyAdminPassword(password) {
-  return String(password || "") === getAdminPassword();
+/**
+ * Checks `password` against the current admin password.
+ *
+ * If Firestore already has a password set, that's the only thing checked
+ * — this is the normal, steady-state path on every device.
+ *
+ * If Firestore does NOT have a password set yet (this app predates this
+ * fix, or it's a brand-new deploy), falls back to this device's legacy
+ * localStorage value (or the hardcoded default) for THIS check only. If
+ * that fallback matches, the password is migrated up to Firestore right
+ * away so every device is in sync from this point on. This only ever
+ * triggers once, and only as a result of someone successfully proving
+ * they know the correct (existing) password — it never overwrites a
+ * password Firestore already has.
+ */
+export async function verifyAdminPassword(password) {
+  const settings = await getAdminSettings();
+
+  if (settings?.adminPassword) {
+    return String(password || "") === settings.adminPassword;
+  }
+
+  const legacyOrDefault = localStorage.getItem(ADMIN_PASSWORD_KEY) || DEFAULT_ADMIN_PASSWORD;
+  const matched = String(password || "") === legacyOrDefault;
+
+  if (matched) {
+    try {
+      await updateAdminPassword(legacyOrDefault);
+      localStorage.removeItem(ADMIN_PASSWORD_KEY);
+    } catch (err) {
+      // Migration failing shouldn't block this login — it'll just be
+      // retried on the next successful login attempt.
+      console.error("[adminAuth] Failed to migrate password to Firestore:", err);
+    }
+  }
+
+  return matched;
 }
 
 /**
@@ -50,6 +128,7 @@ export function validatePasswordStrength(password) {
 
 // ─── Session (login state) ───────────────────────────────────────────────────
 // sessionStorage clears automatically when the browser tab/window closes.
+// Intentionally per-device — see file header note.
 
 export function isAdminLoggedIn() {
   return sessionStorage.getItem(ADMIN_SESSION_KEY) === "true";

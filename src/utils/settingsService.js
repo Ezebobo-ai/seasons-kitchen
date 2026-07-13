@@ -5,6 +5,7 @@
 // Schema:
 // {
 //   whatsappNumber: "234XXXXXXXXXX",
+//   adminPassword:  "...",           // plain string — see note in adminAuth.js
 //   updatedAt: <Firestore Timestamp>
 // }
 
@@ -74,6 +75,13 @@ export async function updateAdminSettings(partialSettings) {
 
 export async function updateWhatsappNumber(whatsappNumber) {
   return updateAdminSettings({ whatsappNumber });
+}
+
+// Only ever called from adminAuth.js, and only after the caller has
+// already verified the CURRENT password — this is always an intentional,
+// already-authenticated write, never an automatic one.
+export async function updateAdminPassword(adminPassword) {
+  return updateAdminSettings({ adminPassword });
 }
 
 export { FALLBACK_WHATSAPP_NUMBER };

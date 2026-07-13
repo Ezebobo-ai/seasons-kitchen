@@ -22,6 +22,7 @@ export default function AdminSettingsPage() {
   const [confirmPassword,  setConfirmPassword]   = useState("");
   const [error,            setError]             = useState("");
   const [success,          setSuccess]           = useState("");
+  const [saving,           setSaving]            = useState(false);
 
   // ── WhatsApp number (Firestore-backed) ────────────────────────────────────
   const [whatsappNumber,    setWhatsappNumber]    = useState("");
@@ -86,7 +87,7 @@ export default function AdminSettingsPage() {
     );
   }
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     setError("");
     setSuccess("");
@@ -96,32 +97,55 @@ export default function AdminSettingsPage() {
       return;
     }
 
-    if (!verifyAdminPassword(currentPassword)) {
+    setSaving(true);
+
+    let currentOk = false;
+    try {
+      currentOk = await verifyAdminPassword(currentPassword);
+    } catch (err) {
+      console.error("[AdminSettingsPage] Password check failed:", err);
+      setSaving(false);
+      setError("❌ Could not reach the server — check your connection and try again.");
+      return;
+    }
+
+    if (!currentOk) {
+      setSaving(false);
       setError("❌ Current password is incorrect.");
       return;
     }
 
     if (newPassword !== confirmPassword) {
+      setSaving(false);
       setError("❌ New password and confirmation do not match.");
       return;
     }
 
     const strength = validatePasswordStrength(newPassword);
     if (!strength.valid) {
+      setSaving(false);
       setError(`❌ ${strength.message}`);
       return;
     }
 
     if (newPassword === currentPassword) {
+      setSaving(false);
       setError("❌ New password must be different from the current password.");
       return;
     }
 
-    setAdminPassword(newPassword);
-    setCurrentPassword("");
-    setNewPassword("");
-    setConfirmPassword("");
-    setSuccess("✅ Password updated successfully.");
+    try {
+      await setAdminPassword(newPassword);
+      setCurrentPassword("");
+      setNewPassword("");
+      setConfirmPassword("");
+      setSuccess("✅ Password updated — this new password now works on every device, immediately.");
+    } catch (err) {
+      console.error("[AdminSettingsPage] Failed to save new password:", err);
+      setError(`❌ ${err.message || "Failed to update password. Please try again."}`);
+    } finally {
+      setSaving(false);
+    }
   };
 
   // ── WhatsApp number submit handler ────────────────────────────────────────
@@ -208,9 +232,10 @@ export default function AdminSettingsPage() {
 
             <button
               type="submit"
-              className="w-full bg-green-600 hover:bg-green-700 text-white py-3 rounded-xl font-semibold text-sm transition shadow-sm"
+              disabled={saving}
+              className="w-full bg-green-600 hover:bg-green-700 disabled:opacity-60 disabled:cursor-not-allowed text-white py-3 rounded-xl font-semibold text-sm transition shadow-sm"
             >
-              Update Password
+              {saving ? "Updating…" : "Update Password"}
             </button>
           </form>
         </div>
