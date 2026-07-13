@@ -13,7 +13,7 @@
 // and only the small download URL string is written to Firestore.
 
 import React, { createContext, useContext, useState, useEffect } from "react";
-import { doc, setDoc, onSnapshot } from "firebase/firestore";
+import { doc, getDoc, setDoc, onSnapshot } from "firebase/firestore";
 import { db } from "../firebase.js";
 import { uploadFileToStorage, deleteFileFromStorage } from "../utils/storageUpload.js";
 import { seedIfAdmin } from "../utils/seedGuard.js";
@@ -55,16 +55,51 @@ function clean(obj) {
   return obj;
 }
 
-// Persist the full media object to Firestore.
-// Uses merge:true so it never overwrites the "menu" key on the same document.
-async function saveMedia(video, images) {
+// ── FIX (CRITICAL-1): read-modify-write, not state-modify-write ───────────
+// Every media write now reads the CURRENT Firestore document immediately
+// before writing, exactly like MenuContext.persist() and
+// InventoryContext.persistInv(). The caller supplies an updater function
+// that receives { video, images } as they exist on the SERVER right now,
+// and returns the new { video, images } to save. This closes the
+// stale-closure race where two near-simultaneous media edits (two tabs,
+// or simply normal onSnapshot round-trip latency) could cause the second
+// write to silently revert the first.
+async function updateMedia(updaterFn) {
+  const ref = ADMIN_REF();
+  let snap;
+  try {
+    snap = await getDoc(ref);
+  } catch (err) {
+    console.error("[MediaContext] updateMedia: failed to read Firestore:", err);
+    throw err;
+  }
+
+  const serverMedia = snap.exists() ? snap.data().media : null;
+  const currentMedia = {
+    video: serverMedia?.video ?? null,
+    images:
+      Array.isArray(serverMedia?.images) && serverMedia.images.length
+        ? serverMedia.images
+        : DEFAULT_IMAGE_ENTRIES,
+  };
+
+  const nextMedia = updaterFn(currentMedia);
+
   const payload = clean({
     media: {
-      video: video ?? null,          // null is safe in Firestore; undefined is not
-      images: images ?? [],
+      video: nextMedia.video ?? null,        // null is safe in Firestore; undefined is not
+      images: nextMedia.images ?? [],
     },
   });
-  await setDoc(ADMIN_REF(), payload, { merge: true });
+
+  try {
+    await setDoc(ref, payload, { merge: true });
+    // Do NOT call setHeroVideo/setSlideshowImages here — onSnapshot handles it,
+    // exactly as documented in MenuContext/InventoryContext.
+  } catch (err) {
+    console.error("[MediaContext] updateMedia failed:", err);
+    throw err;
+  }
 }
 
 export function MediaProvider({ children }) {
@@ -91,7 +126,7 @@ export function MediaProvider({ children }) {
           } else {
             // Field missing on an existing doc — seed it, but ONLY from an
             // authenticated admin session. This intentionally bypasses
-            // saveMedia() (used by real admin edits) and calls the guard
+            // updateMedia() (used by real admin edits) and calls the guard
             // directly, so media edit logic itself is untouched.
             // See utils/seedGuard.js.
             const payload = clean({ media: { video: null, images: DEFAULT_IMAGE_ENTRIES } });
@@ -116,9 +151,12 @@ export function MediaProvider({ children }) {
   const uploadVideo = async (file) => {
     const { url, path } = await uploadFileToStorage(file, "media/videos");
     const entry = { src: url, name: file.name, path };
-    const previousPath = heroVideo?.path;
+    let previousPath;
     try {
-      await saveMedia(entry, slideshowImages);
+      await updateMedia((current) => {
+        previousPath = current.video?.path;
+        return { video: entry, images: current.images };
+      });
       // Clean up the old video file now that the new one is confirmed saved.
       if (previousPath) deleteFileFromStorage(previousPath);
       return entry;
@@ -132,9 +170,12 @@ export function MediaProvider({ children }) {
   };
 
   const deleteVideo = async () => {
-    const previousPath = heroVideo?.path;
+    let previousPath;
     try {
-      await saveMedia(null, slideshowImages);
+      await updateMedia((current) => {
+        previousPath = current.video?.path;
+        return { video: null, images: current.images };
+      });
       if (previousPath) deleteFileFromStorage(previousPath);
     } catch (err) {
       console.error("[MediaContext] deleteVideo failed:", err);
@@ -151,8 +192,10 @@ export function MediaProvider({ children }) {
         const { url, path } = await uploadFileToStorage(file, "media/images");
         uploaded.push({ src: url, name: file.name, path });
       }
-      const next = [...slideshowImages, ...uploaded].slice(0, 20);
-      await saveMedia(heroVideo, next);
+      await updateMedia((current) => ({
+        video: current.video,
+        images: [...current.images, ...uploaded].slice(0, 20),
+      }));
       return uploaded;
     } catch (err) {
       console.error("[MediaContext] uploadImages save failed:", err);
@@ -163,11 +206,23 @@ export function MediaProvider({ children }) {
   };
 
   const deleteImage = async (index) => {
-    const removed = slideshowImages[index];
-    const next = slideshowImages.filter((_, i) => i !== index);
+    // Identify WHICH image was clicked using its own identity (Storage path,
+    // or src for the hardcoded defaults that have no path), not its position.
+    // `index` is only valid against this browser's local `slideshowImages` —
+    // it cannot be safely applied to the freshly-read server array, which
+    // may have a different order/length by the time updateMedia's getDoc()
+    // resolves. Matching by identity means the correct image is removed
+    // wherever it now sits, and is a safe no-op if it was already removed.
+    const target = slideshowImages[index];
+    if (!target) return;
     try {
-      await saveMedia(heroVideo, next);
-      if (removed?.path) deleteFileFromStorage(removed.path);
+      await updateMedia((current) => ({
+        video: current.video,
+        images: current.images.filter((img) =>
+          target.path ? img.path !== target.path : img.src !== target.src
+        ),
+      }));
+      if (target.path) deleteFileFromStorage(target.path);
     } catch (err) {
       console.error("[MediaContext] deleteImage failed:", err);
       throw err;
@@ -175,13 +230,21 @@ export function MediaProvider({ children }) {
   };
 
   const replaceImage = async (index, file) => {
+    // Same identity-matching reasoning as deleteImage above.
+    const target = slideshowImages[index];
+    if (!target) {
+      throw new Error("That image was changed elsewhere — please refresh and try again.");
+    }
     const { url, path } = await uploadFileToStorage(file, "media/images");
     const entry = { src: url, name: file.name, path };
-    const previous = slideshowImages[index];
-    const next = slideshowImages.map((img, i) => (i === index ? entry : img));
     try {
-      await saveMedia(heroVideo, next);
-      if (previous?.path) deleteFileFromStorage(previous.path);
+      await updateMedia((current) => ({
+        video: current.video,
+        images: current.images.map((img) =>
+          (target.path ? img.path === target.path : img.src === target.src) ? entry : img
+        ),
+      }));
+      if (target.path) deleteFileFromStorage(target.path);
       return entry;
     } catch (err) {
       console.error("[MediaContext] replaceImage save failed:", err);
@@ -191,9 +254,12 @@ export function MediaProvider({ children }) {
   };
 
   const resetImages = async () => {
-    const previousPaths = slideshowImages.map((img) => img.path).filter(Boolean);
+    let previousPaths = [];
     try {
-      await saveMedia(heroVideo, DEFAULT_IMAGE_ENTRIES);
+      await updateMedia((current) => {
+        previousPaths = current.images.map((img) => img.path).filter(Boolean);
+        return { video: current.video, images: DEFAULT_IMAGE_ENTRIES };
+      });
       previousPaths.forEach(deleteFileFromStorage);
     } catch (err) {
       console.error("[MediaContext] resetImages failed:", err);
