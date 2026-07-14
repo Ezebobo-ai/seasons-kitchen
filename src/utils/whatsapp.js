@@ -234,7 +234,15 @@ export async function sendNewOrderToKitchen(orderData) {
   // Open the tab synchronously (on the user's click) so browsers don't
   // block it as a popup — we navigate it to the real link once the
   // WhatsApp number has been fetched from Firestore.
-  const waTab = window.open("", "_blank", "noopener,noreferrer");
+  //
+  // FIX: this call must NOT use "noopener"/"noreferrer". Both flags make
+  // window.open() return null (per spec — the caller is denied a handle
+  // to the new window), which meant `waTab` below was always null, the
+  // blank tab could never be navigated to the real wa.me link, and the
+  // async fallback window.open() ran too late to count as a direct
+  // response to the user's click — so browsers blocked that one too.
+  // Net effect: a permanently blank tab and nothing ever sent.
+  const waTab = window.open("", "_blank");
 
   let number;
   try {

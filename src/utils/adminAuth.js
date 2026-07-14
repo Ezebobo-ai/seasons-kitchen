@@ -24,14 +24,59 @@
 // unauthenticated, consistent with the CRITICAL-2 fix in MenuContext /
 // InventoryContext / MediaContext.
 
+// ── FORCE-LOGOUT ON PASSWORD CHANGE: each device that logs in records a
+// "password version" (the server's passwordChangedAt, as millis) in its own
+// sessionStorage. usePasswordChangeWatcher.js listens to that field live and
+// logs the device out the moment it sees a version this session didn't set
+// itself — i.e. the password was changed somewhere else.
+
 import { getAdminSettings, updateAdminPassword } from "./settingsService.js";
 
 // ─── Storage keys ────────────────────────────────────────────────────────────
 const ADMIN_PASSWORD_KEY = "sk_admin_password"; // legacy, per-device — read-only now, used only for migration
 const ADMIN_SESSION_KEY  = "sk_admin_session";
+const PW_VERSION_KEY     = "sk_admin_pw_version"; // this session's known passwordChangedAt (ms), or "0" if unset
 
 // Default password for first-time use / brand-new deploy.
 const DEFAULT_ADMIN_PASSWORD = "admin123";
+
+function toVersionString(passwordChangedAt) {
+  return passwordChangedAt?.toMillis ? String(passwordChangedAt.toMillis()) : "0";
+}
+
+/** Records the given settings' passwordChangedAt as THIS session's known
+ *  version, so the change-watcher won't treat it as a foreign change. */
+function recordPasswordVersion(settings) {
+  sessionStorage.setItem(PW_VERSION_KEY, toVersionString(settings?.passwordChangedAt));
+}
+
+/** Used by usePasswordChangeWatcher.js to compare against live Firestore data. */
+export function getStoredPasswordVersion() {
+  return sessionStorage.getItem(PW_VERSION_KEY);
+}
+
+export function setStoredPasswordVersion(versionString) {
+  sessionStorage.setItem(PW_VERSION_KEY, versionString);
+}
+
+export function clearStoredPasswordVersion() {
+  sessionStorage.removeItem(PW_VERSION_KEY);
+}
+
+// A plain module-level flag (NOT sessionStorage) — scoped to this one tab's
+// JS execution context only. setAdminPassword() sets it synchronously BEFORE
+// writing to Firestore, so even the near-instant local echo of our own write
+// that the watcher's onSnapshot receives is covered — there is no read-after
+// -write race to lose. Other tabs/devices have their own separate module
+// instance, so this flag never suppresses a genuinely foreign change.
+let selfChangeInFlight = false;
+
+/** Called by usePasswordChangeWatcher.js when it sees a version change. */
+export function consumeSelfChangeFlag() {
+  const was = selfChangeInFlight;
+  selfChangeInFlight = false;
+  return was;
+}
 
 // ─── Password storage (Firestore-backed) ─────────────────────────────────────
 
@@ -56,8 +101,13 @@ export async function getAdminPassword() {
  * writes work elsewhere in this app (persist(), persistInv(), etc.).
  */
 export async function setAdminPassword(newPassword) {
+  // Set BEFORE the write — synchronous, same tick — so this tab's own
+  // watcher can never mistake its own change for a foreign one, regardless
+  // of how fast the local onSnapshot echo arrives. See selfChangeInFlight above.
+  selfChangeInFlight = true;
   const result = await updateAdminPassword(newPassword);
   if (!result.success) {
+    selfChangeInFlight = false;
     throw new Error("Could not save the new password — please check your connection and try again.");
   }
   // The Firestore value is now authoritative; drop the stale per-device copy.
@@ -83,7 +133,9 @@ export async function verifyAdminPassword(password) {
   const settings = await getAdminSettings();
 
   if (settings?.adminPassword) {
-    return String(password || "") === settings.adminPassword;
+    const ok = String(password || "") === settings.adminPassword;
+    if (ok) recordPasswordVersion(settings); // this login now knows the current version
+    return ok;
   }
 
   const legacyOrDefault = localStorage.getItem(ADMIN_PASSWORD_KEY) || DEFAULT_ADMIN_PASSWORD;
@@ -93,6 +145,8 @@ export async function verifyAdminPassword(password) {
     try {
       await updateAdminPassword(legacyOrDefault);
       localStorage.removeItem(ADMIN_PASSWORD_KEY);
+      const fresh = await getAdminSettings();
+      recordPasswordVersion(fresh); // this device originated the migration — not a foreign change
     } catch (err) {
       // Migration failing shouldn't block this login — it'll just be
       // retried on the next successful login attempt.
@@ -141,4 +195,5 @@ export function setAdminLoggedIn(loggedIn) {
 
 export function logoutAdmin() {
   setAdminLoggedIn(false);
+  clearStoredPasswordVersion();
 }

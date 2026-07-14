@@ -1,6 +1,6 @@
 // src/pages/AdminSettingsPage.jsx
 // /admin/settings — Change Password + WhatsApp Number (admin must be logged in).
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
   isAdminLoggedIn,
@@ -8,6 +8,7 @@ import {
   setAdminPassword,
   validatePasswordStrength,
 } from "../utils/adminAuth.js";
+import { usePasswordChangeWatcher } from "../utils/usePasswordChangeWatcher.js";
 import {
   getAdminSettings,
   updateWhatsappNumber,
@@ -15,7 +16,8 @@ import {
 
 export default function AdminSettingsPage() {
   const navigate = useNavigate();
-  const [loggedIn] = useState(() => isAdminLoggedIn());
+  const [loggedIn, setLoggedIn] = useState(() => isAdminLoggedIn());
+  const [forcedOut, setForcedOut] = useState(false);
 
   const [currentPassword,  setCurrentPassword]  = useState("");
   const [newPassword,      setNewPassword]       = useState("");
@@ -31,6 +33,13 @@ export default function AdminSettingsPage() {
   const [waError,           setWaError]           = useState("");
   const [waSuccess,         setWaSuccess]         = useState("");
   const [waLoadFailed,      setWaLoadFailed]      = useState(false);
+
+  // Force-logout this device the moment the password is changed elsewhere.
+  const handleForceLogout = useCallback(() => {
+    setLoggedIn(false);
+    setForcedOut(true);
+  }, []);
+  usePasswordChangeWatcher(loggedIn, handleForceLogout);
 
   // Load current settings from Firestore on mount.
   useEffect(() => {
@@ -72,9 +81,13 @@ export default function AdminSettingsPage() {
       <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
         <div className="bg-white p-8 rounded-2xl shadow-lg w-full max-w-sm border border-gray-100 text-center">
           <span className="text-3xl">🔒</span>
-          <h2 className="mt-3 text-lg font-bold text-gray-800">Admin Login Required</h2>
+          <h2 className="mt-3 text-lg font-bold text-gray-800">
+            {forcedOut ? "Logged Out" : "Admin Login Required"}
+          </h2>
           <p className="text-sm text-gray-500 mt-2">
-            You need to log in before you can change the admin password.
+            {forcedOut
+              ? "The admin password was changed on another device, so this session was logged out for security. Please log in with the new password."
+              : "You need to log in before you can change the admin password."}
           </p>
           <Link
             to="/admin"

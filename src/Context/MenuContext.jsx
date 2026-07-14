@@ -48,13 +48,13 @@ const SEED_MENU = [
   { id: 21, category: "Swallow & Soups", name: "Vegetable Soup", price: 4000, image: "/vegetable soup.jpeg", description: "Rich, dark green leafy vegetable soup with assorted meat and fish, cooked in palm oil.", quantityAvailable: 15 },
 
   // Soup Bowls
-  { id: 201, category: "Soup Bowls", name: "Okra Soup Bowl (3ltrs)", price: 20000, image: "/okoro.jpeg", description: "A generous 3-litre pot of thick, slimy okra soup with fish and assorted proteins.", quantityAvailable: 5 },
-  { id: 202, category: "Soup Bowls", name: "Ogbono Soup Bowl (3ltrs)", price: 20000, image: "/ogbono.jpeg", description: "Silky, draw-style ogbono soup with an earthy richness, packed with meat and crayfish.", quantityAvailable: 5 },
-  { id: 203, category: "Soup Bowls", name: "Egusi Soup Bowl (3ltrs)", price: 20000, image: "/Egusi.jpeg", description: "Thick, nutty egusi (melon seed) soup in palm oil with assorted meats. 3 litres of pure comfort.", quantityAvailable: 5 },
-  { id: 204, category: "Soup Bowls", name: "Oha Soup Bowl (3ltrs)", price: 30000, image: "/oha.jpeg", description: "Delicate oha leaf soup with cocoyam thickener and rich proteins. A true Eastern Nigerian classic.", quantityAvailable: 5 },
-  { id: 205, category: "Soup Bowls", name: "Ofada Stew Bowl (3ltrs)", price: 25000, image: "/ofa.jpeg", description: "Pungent, complex ofada stew with unripe peppers, locust beans, and assorted offal.", quantityAvailable: 5 },
-  { id: 206, category: "Soup Bowls", name: "Chicken Stew Bowl (3ltrs)", price: 37000, image: "/stew.jpeg", description: "A rich tomato-based chicken stew, slow-cooked and deeply seasoned. 3 litres, pure joy.", quantityAvailable: 5 },
-  { id: 207, category: "Soup Bowls", name: "White Soup Bowl (3ltrs)", price: 50000, image: "/ws.jpeg", description: "Creamy, delicate nsala (white soup) with fresh fish and aromatic utazi leaf. Premium and flavourful.", quantityAvailable: 3 },
+  { id: 201, category: "Soup Bowls", name: "Okra Soup Bowl (2ltrs)", price: 20000, image: "/okoro.jpeg", description: "A generous 2-litre pot of thick, slimy okra soup with fish and assorted proteins.", quantityAvailable: 5 },
+  { id: 202, category: "Soup Bowls", name: "Ogbono Soup Bowl (2ltrs)", price: 20000, image: "/ogbono.jpeg", description: "Silky, draw-style ogbono soup with an earthy richness, packed with meat and crayfish.", quantityAvailable: 5 },
+  { id: 203, category: "Soup Bowls", name: "Egusi Soup Bowl (2ltrs)", price: 20000, image: "/Egusi.jpeg", description: "Thick, nutty egusi (melon seed) soup in palm oil with assorted meats. 3 litres of pure comfort.", quantityAvailable: 5 },
+  { id: 204, category: "Soup Bowls", name: "Oha Soup Bowl (2ltrs)", price: 30000, image: "/oha.jpeg", description: "Delicate oha leaf soup with cocoyam thickener and rich proteins. A true Eastern Nigerian classic.", quantityAvailable: 5 },
+  { id: 205, category: "Soup Bowls", name: "Ofada Stew Bowl (2ltrs)", price: 25000, image: "/ofa.jpeg", description: "Pungent, complex ofada stew with unripe peppers, locust beans, and assorted offal.", quantityAvailable: 5 },
+  { id: 206, category: "Soup Bowls", name: "Chicken Stew Bowl (2ltrs)", price: 37000, image: "/stew.jpeg", description: "A rich tomato-based chicken stew, slow-cooked and deeply seasoned. 2 litres, pure joy.", quantityAvailable: 5 },
+  { id: 207, category: "Soup Bowls", name: "White Soup Bowl (2ltrs)", price: 50000, image: "/ws.jpeg", description: "Creamy, delicate nsala (white soup) with fresh fish and aromatic utazi leaf. Premium and flavourful.", quantityAvailable: 3 },
 
   // Snacks
   { id: 34, category: "Snacks", name: "Meat Pie", price: 1000, image: "/Meat pea.jpg", description: "Flaky, golden pastry filled with seasoned minced meat, potatoes, and carrots. A Nigerian classic snack.", quantityAvailable: 30 },

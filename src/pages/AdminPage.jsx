@@ -1,4 +1,4 @@
-import React, { useContext, useState, useEffect, useRef } from "react";
+import React, { useContext, useState, useEffect, useRef, useCallback } from "react";
 import { Link } from "react-router-dom";
 import {
   isAdminLoggedIn,
@@ -6,6 +6,7 @@ import {
   logoutAdmin,
   verifyAdminPassword,
 } from "../utils/adminAuth.js";
+import { usePasswordChangeWatcher } from "../utils/usePasswordChangeWatcher.js";
 import { CartContext } from "../Context/CartContext.jsx";
 import { MenuContext, CATEGORIES } from "../Context/MenuContext.jsx";
 import { FeedbackContext } from "../Context/FeedbackContext.jsx";
@@ -93,6 +94,7 @@ export default function AdminPage() {
   const [adminPassword, setAdminPasswordInput] = useState("");
   const [loginError, setLoginError] = useState("");
   const [loginChecking, setLoginChecking] = useState(false);
+  const [sessionExpiredMsg, setSessionExpiredMsg] = useState("");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [openOrder, setOpenOrder] = useState(null);
@@ -184,8 +186,17 @@ export default function AdminPage() {
   };
 
   // ─── AUTH ─────────────────────────────────────────────────────────────────
+
+  // Force-logout this device the moment the password is changed elsewhere.
+  const handleForceLogout = useCallback(() => {
+    setIsAuthenticated(false);
+    setSessionExpiredMsg("🔒 You were logged out because the admin password was changed on another device. Please log in with the new password.");
+  }, []);
+  usePasswordChangeWatcher(isAuthenticated, handleForceLogout);
+
   const handleLogin = async () => {
     setLoginError("");
+    setSessionExpiredMsg("");
     setLoginChecking(true);
     let ok = false;
     try {
@@ -345,6 +356,9 @@ export default function AdminPage() {
             <h2 className="mt-3 text-xl font-bold text-green-700">Seasons Kitchen</h2>
             <p className="text-sm text-gray-400">Admin Dashboard</p>
           </div>
+          {sessionExpiredMsg && (
+            <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 font-medium mb-3 text-center">{sessionExpiredMsg}</p>
+          )}
           <input
             type="password"
             placeholder="Enter admin password"

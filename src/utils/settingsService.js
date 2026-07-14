@@ -6,6 +6,12 @@
 // {
 //   whatsappNumber: "234XXXXXXXXXX",
 //   adminPassword:  "...",           // plain string — see note in adminAuth.js
+//   passwordChangedAt: <Firestore Timestamp>, // bumped ONLY on password changes,
+//                                              // separate from `updatedAt` (which
+//                                              // also moves on WhatsApp-number saves)
+//                                              // — used to detect a password change
+//                                              // from another device. See
+//                                              // usePasswordChangeWatcher.js.
 //   updatedAt: <Firestore Timestamp>
 // }
 
@@ -81,7 +87,7 @@ export async function updateWhatsappNumber(whatsappNumber) {
 // already verified the CURRENT password — this is always an intentional,
 // already-authenticated write, never an automatic one.
 export async function updateAdminPassword(adminPassword) {
-  return updateAdminSettings({ adminPassword });
+  return updateAdminSettings({ adminPassword, passwordChangedAt: serverTimestamp() });
 }
 
 export { FALLBACK_WHATSAPP_NUMBER };
