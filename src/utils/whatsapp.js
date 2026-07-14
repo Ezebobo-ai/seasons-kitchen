@@ -244,6 +244,21 @@ export async function sendNewOrderToKitchen(orderData) {
   // Net effect: a permanently blank tab and nothing ever sent.
   const waTab = window.open("", "_blank");
 
+  // Brand the tab for the brief moment it's still ours — before it hands
+  // off to WhatsApp, whose own title/icon take over once wa.me loads
+  // (that part is outside our control; this only covers our own loading gap).
+  if (waTab) {
+    try {
+      waTab.document.title = "Seasons Kitchen";
+      const icon = waTab.document.createElement("link");
+      icon.rel = "icon";
+      icon.href = `${window.location.origin}/logo.png`;
+      waTab.document.head.appendChild(icon);
+    } catch (err) {
+      console.error("[whatsapp] Could not brand the loading tab:", err);
+    }
+  }
+
   let number;
   try {
     number = await getWhatsappNumber();
